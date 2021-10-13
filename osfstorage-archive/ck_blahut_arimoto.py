@@ -14,6 +14,7 @@ import numpy as np
 
 # needed to define this because the dit version uses Distributions rather than numpy nd_arrays
 
+
 def my_relative_entropy(dist1, dist2):
     """
     The cross entropy between `dist1` and `dist2`.
@@ -31,6 +32,7 @@ def my_relative_entropy(dist1, dist2):
     xh = -np.nansum(p1s * np.log2(q1s))
     return xh
 
+
 def my_kl(dist1, dist2):
     """
     The KL divergence between `dist1` and `dist2`.
@@ -44,7 +46,7 @@ def my_kl(dist1, dist2):
 
     p1s = dist1
     q1s = dist2
-    
+
     xh = -np.nansum(p1s * np.log2(q1s))
     e = -np.nansum(p1s * np.log2(p1s))
     kld = xh - e
@@ -57,7 +59,10 @@ def my_kl(dist1, dist2):
 
 # Adjusted the dit version to allow initialization
 
-def ck_blahut_arimoto_ib(p_xy, beta, qinit, divergence=my_relative_entropy, max_iters=100):  # pragma: no cover
+
+def ck_blahut_arimoto_ib(
+    p_xy, beta, qinit, divergence=my_relative_entropy, max_iters=100
+):  # pragma: no cover
     """
     Perform a robust form of the Blahut-Arimoto algorithms.
 
@@ -99,18 +104,20 @@ def ck_blahut_arimoto_ib(p_xy, beta, qinit, divergence=my_relative_entropy, max_
         d(x, t) = D[ p(Y|x) || q(Y|t) ]
         """
         q_y_t = next_q_y_t(q_t_x)
-        distortions = np.asarray([divergence(a, b) for a in p_y_x for b in q_y_t]).reshape(q_y_t.shape)
+        distortions = np.asarray(
+            [divergence(a, b) for a in p_y_x for b in q_y_t]
+        ).reshape(q_y_t.shape)
         return distortions
 
-    rd, q_xt = _blahut_arimoto(p_x=p_x,
-                              beta=beta,
-                              q_y_x=qinit,
-                              distortion=distortion,
-                              max_iters=max_iters,
-                              )
+    rd, q_xt = _blahut_arimoto(
+        p_x=p_x,
+        beta=beta,
+        q_y_x=qinit,
+        distortion=distortion,
+        max_iters=max_iters,
+    )
 
     q_t_x = q_xt / q_xt.sum(axis=1, keepdims=True)
     q_xyt = p_xy[:, :, np.newaxis] * q_t_x[:, np.newaxis, :]
 
     return rd, q_xyt
-

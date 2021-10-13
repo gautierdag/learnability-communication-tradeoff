@@ -9,8 +9,9 @@ class Dataset(BaseDataset):
 
     def cldf_specs(self):  # A dataset must declare all CLDF sets it creates.
         from cldfbench import CLDFSpec
-        return CLDFSpec(dir=self.cldf_dir, module='StructureDataset')
-        #return super().cldf_specs()
+
+        return CLDFSpec(dir=self.cldf_dir, module="StructureDataset")
+        # return super().cldf_specs()
 
     def cmd_download(self, args):
         """
