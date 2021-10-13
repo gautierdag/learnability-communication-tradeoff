@@ -1,0 +1,696 @@
+---
+title: "Number IB"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+library(themis)
+library(lme4)
+library(patchwork)
+library(ggrepel)
+library(ggridges)
+library(here)
+
+nu_scale = scale_fill_gradient(low='#D3A625', high='#d34f25')
+nur_scale = scale_fill_gradient(high='#D3A625', low='#d34f25')
+
+library(reticulate)
+use_python("/usr/bin/python3", required = TRUE)
+```
+
+```{python config}
+import numpy as np
+from ibhelpers import *
+from tense_specs import domain_spec
+from scipy.spatial import distance
+import pandas
+````
+
+# Number
+
+## Meaning
+
+In this analysis, we will use the information bottleneck method to define an optimal frontier, score attested languages, score possible languages and check whether distance to the pareto-frontier is a better predictor of whether a language is attested than either complexity or information loss alone.
+
+### Assumptions
+
+The first thing we do is formalize our assumptions.
+
+```{python number_specification}
+
+p_x = np.array([0.645, 0.161, 0.072, 0.040, 0.026, 0.018, 0.013, 0.010, 0.008, 0.006])
+
+eps = 1e-5
+
+# Sam's prior
+p_xGy = np.array(    [[0.999,     0,     0,     0,     0,     0,     0,     0,     0,     0],
+                     [0.034, 0.942, 0.024,     0,     0,     0,     0,     0,     0,     0],
+                     [    0, 0.102,  0.81, 0.088,     0,     0,     0,     0,     0,     0],
+                     [    0, 0.004, 0.162, 0.682,  0.15, 0.003,     0,     0,     0,     0],
+                     [    0,     0, 0.014, 0.202, 0.579, 0.193, 0.012,     0,     0,     0],
+                     [    0,     0, 0.002,  0.03, 0.224, 0.499, 0.217, 0.026, 0.001,     0],
+                     [    0,     0,     0, 0.005, 0.047, 0.233, 0.437, 0.229, 0.044, 0.004],
+                     [    0,     0,     0, 0.001,  0.01, 0.064, 0.235,  0.39, 0.232, 0.061],
+                     [    0,     0,     0,     0, 0.003, 0.018, 0.082, 0.241, 0.364, 0.239],
+                     [    0,     0,     0,     0, 0.001, 0.006, 0.031, 0.114, 0.283, 0.399]])
+
+
+p_xGy += eps
+p_xGy = p_xGy / p_xGy.sum(axis=1, keepdims=True)
+p_xy = p_xGy * p_x[:, np.newaxis]
+p_xy = p_xy / np.sum(p_xy)
+
+p_mGs = p_xy / np.sum(p_xy, axis=0)
+
+eps = 0.01
+q0 = (1 - eps) * np.eye(10) + eps * np.ones((10, 10))
+
+items = [str(x+1) for x in range(10)]
+
+```
+
+Plot those assumptions
+
+```{r number_fig1}
+
+num_prior = data.frame(x=1:10, p=py$p_x)
+
+num_px = num_prior %>%
+    ggplot(aes(x, p, fill=x)) +
+    geom_bar(stat='identity') +
+    theme_classic(base_size = 18) +
+    ylab('Prior Probability') +
+    xlab('Speaker Distribution') +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    coord_cartesian(ylim = c(0, 0.75)) +
+    scale_x_continuous(breaks=1:10, labels=c(expression(s[1]), expression(s[2]), expression(s[3]), expression(s[4]), expression(s[5]), 
+                              expression(s[6]), expression(s[7]), expression(s[8]), expression(s[9]), expression(s[10]))) +
+    nu_scale +
+    guides(fill=F)
+num_px
+
+num_meaning = py$p_xGy %>%
+    as.data.frame() %>%
+    rename(`s[1]` = V1, `s[2]` = V2, `s[3]` = V3, `s[4]` = V4, `s[5]` = V5,
+           `s[6]` = V6, `s[7]` = V7, `s[8]` = V8, `s[9]` = V9, `s[10]` = V10) %>%
+    mutate(x=1:10) %>%
+    gather(goal, p,`s[1]`:`s[10]`) %>%
+    mutate(goal = fct_relevel(goal, c('s[10]', 's[9]', 's[8]', 's[7]', 's[6]', 's[5]', 's[4]', 's[3]', 's[2]', 's[1]')))
+
+num_pxy = num_meaning %>%
+    ggplot(aes(x=x, y=p, group=goal)) +
+  facet_grid(goal~., scales = 'free_y', switch = 'y', as.table = F, labeller = label_parsed) +
+    geom_bar(stat='identity', aes(fill=as.numeric(goal)), 
+                        alpha=0.8) +
+    theme_classic(base_size = 18) +
+    geom_hline(yintercept = 0) +
+    guides(fill=F) +
+    ggtitle('Number') +
+    ylab('Speaker Distribution') +
+    xlab('World State') +
+    scale_x_continuous(breaks=1:10, label=1:10) +
+    nur_scale +
+    theme(axis.ticks.y = element_blank(),
+          axis.text.y = element_blank(),
+          axis.line.y = element_blank())
+num_pxy
+
+```
+
+### The Pareto Frontier 
+
+```{python number_ib}
+# trace out optimal frontier
+q0 = q0 / q0.sum(axis=1, keepdims=True)
+betas = np.array([2.0 ** x for x in np.arange(4, 0, -0.001)])
+focalbeta = 1.
+
+q, beta, ibscores, qresult, qseq, qseqresults, allqs = fit_ib(p_xy, q0, focalbeta, betas, verbose=1)
+
+ib_scores_df = pandas.DataFrame(np.array(ibscores), columns = ['rate', 'distortion', 'elen'])
+ib_scores_df['beta'] = betas
+ib_scores_df['q'] = allqs
+ib_scores_df['Wn'] = [mergecols(q).shape[1] for q in ib_scores_df['q']]
+
+# fetch optimal stochastic systems
+stochSys = []
+for i, q in enumerate(zip(qseq, qseqresults)):
+    for w in mergecols(q[0]).transpose():
+        stochSys.append([len(qseq)-i, q[1][0], q[1][1]] + list(w))
+
+stochSys = pandas.DataFrame(data=np.array(stochSys), columns = ['n', 'rate', 'distortion', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10'])
+
+```
+
+```{python frontier_metrics}
+
+# compute distance from optimal frontier
+def fd(asys, ibscores):
+    mind = distance.cdist([[asys['rate'], asys['distortion']]], ibscores[['rate', 'distortion']]).min()
+    return mind
+
+
+def gNID_d(asys, paretoQs, betas, pX):
+    mind = np.zeros((len(asys), len(paretoQs)))
+    for li in range(len(asys)):
+        for qi, q in enumerate(paretoQs):
+            mind[li, qi] = gNID(asys.iloc[li]['q'], q, pX)
+    return np.argmin(mind, axis=1), np.min(mind, axis=1), betas[np.argmin(mind, axis=1)]
+
+
+```
+
+### Attested Languages 
+
+First we load
+
+```{python number_channel}
+
+attested_data = pandas.read_csv('Data/Number_Meanings.csv')
+
+q_b  =   np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+q_sg =   np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+q_du =   np.array([0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+q_tr =   np.array([0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+q_pauc = np.array([0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+q_pauc2 = np.array([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+q_pauc4 = np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+q_gpauc = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0])
+q_pl =   np.array([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+q_pl3 =   np.array([0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+q_pl6 =   np.array([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+q_pl8 =  np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0])
+
+
+
+def present(x):
+    x =  str(x)
+    x = str.split(x, ';')[0]
+    return (x in ['a', 'b', 'c', 'd', 'e', 'f'])
+
+
+def make_fine_channel(td):
+    q = []
+    if present(td.BARE):
+        q.append(q_b)
+    if present(td.SG):
+        q.append(q_sg)
+    if present(td.DU):
+        q.append(q_du)
+    if present(td.TR):
+        q.append(q_tr)
+    if present(td.PAUC2):
+        q.append(q_pauc2)
+    if present(td.PAUC3):
+        q.append(q_pauc)
+    if present(td.PAUC4):
+        q.append(q_pauc4)
+    if present(td.GPAUC):
+        q.append(q_gpauc)
+    if present(td.PL2):
+        q.append(q_pl)
+    if present(td.PL3):
+        q.append(q_pl3)
+    if present(td.PL6):
+        q.append(q_pl6)
+    if present(td.PL8):
+        q.append(q_pl8)
+    
+    if len(q) < 10:
+        fill = [[j/(11-len(q)) for j in q[-1]]]*(11-len(q))
+        del q[-1]
+        q.extend(fill)
+        
+    q = np.array(q).transpose()
+    
+    return q / q.sum(axis=1, keepdims=True)
+
+
+def make_channel(td):
+    q = []
+    if present(td.BARE):
+        q.append(q_b)
+    if present(td.SG):
+        q.append(q_sg)
+    if present(td.DU):
+        q.append(q_du)
+    if present(td.TR):
+        q.append(q_tr)
+    if present(td.PAUC):
+        q.append(q_pauc)
+    if present(td.PL):
+        q.append(q_pl)
+    
+    if len(q) < 10:
+        fill = [[j/(11-len(q)) for j in q[-1]]]*(11-len(q))
+        del q[-1]
+        q.extend(fill)
+        
+    q = np.array(q).transpose()
+    
+    return q / q.sum(axis=1, keepdims=True)
+
+attested_data['q'] = attested_data.apply(make_fine_channel,  axis=1)
+attested_data = attested_data[['Language', 'Family', 'Source', 'q']]
+attested_data['ind'] = range(attested_data.shape[0])
+
+```
+
+Now score them
+
+```{python number_attested}
+attested_data['rate'] = 0
+attested_data['distortion'] = 0
+
+for i in attested_data['ind']:
+    q = attested_data.loc[i, 'q']
+    n = naturalness(q, p_mGs)
+    result = score_q_kl(p_xy, q)
+    attested_data.loc[i,  'rate'] = result.rate
+    attested_data.loc[i,  'distortion'] = result.distortion
+    attested_data.loc[i,  'naturalness'] = np.sum(n)
+
+attested_data['frontier_dist'] = attested_data.apply(fd,  args = (ib_scores_df,), axis=1)
+attested_data['rate_round'] = np.round(attested_data['rate'], 4)
+attested_data['distortion_round'] = np.round(attested_data['distortion'], 4)
+attested_data['frontier_dist_round'] = np.round(attested_data['frontier_dist'], 4)
+_, attested_data['gNID'], attested_data['gNID_beta']  = gNID_d(attested_data, allqs, betas, p_x)
+attested_data['Wn'] = [mergecols(q).shape[1] for q in attested_data['q']]
+
+channels = []
+for i in attested_data['ind']:
+    q = attested_data.loc[i, 'q']
+    for w in mergecols(q).transpose():
+        channels.append([attested_data.loc[i, 'Language'], attested_data.loc[i, 'rate'], attested_data.loc[i, 'distortion']] + list(w))
+
+channels = pandas.DataFrame(data=np.array(channels), columns = ['Language', 'rate', 'distortion', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10'])
+
+```
+
+### Possible Languages
+
+```{python number_possible}
+# deterministic systems with item labels
+detsystems = list(partition(items))
+# deterministic systems with item indices
+iteminds = list(range(len(items)))
+detsysteminds = list(partition(iteminds))
+
+# score deterministic systems
+ds_scores = []
+dqs = []
+for ds in detsysteminds:
+    q = partition2q(ds)
+    dqs.append(q)
+    n = naturalness(q, p_mGs)
+    result = score_q_kl(p_xy, q)
+    print(ds, result, np.sum(n))
+    ds_scores.append((result.rate, result.distortion, np.sum(n)))
+
+ds_scores_df = pandas.DataFrame(np.array(ds_scores), columns = ['rate', 'distortion', 'naturalness'])
+ds_scores_df['categories'] = np.array(detsysteminds)
+ds_scores_df['q'] = dqs
+ds_scores_df['n'] = ds_scores_df['categories'].apply(lambda x: len(x))
+ds_scores_df['frontier_dist'] = ds_scores_df.apply(fd,  args = (ib_scores_df,), axis=1)
+# Computation takes very very long
+# _, ds_scores_df['gNID'], ds_scores_df['gNID_beta']  = gNID_d(ds_scores_df, qseq, betas, p_x)
+ds_scores_df['Wn'] = [mergecols(q).shape[1] for q in ds_scores_df['q']]
+
+```
+
+```{python num_postProcess, echo=F, eval=F}
+# Save the partial outputs
+
+ib_scores_df.to_csv('Output/Number/pareto.csv')
+ds_scores_df.to_csv('Output/Number/detSys.csv')
+attested_data.to_csv('Output/Number/attested.csv')
+stochSys.to_csv('Output/Number/stochSys.csv')
+channels.to_csv('Output/Number/channels.csv')
+
+```
+
+### Putting it all Together
+
+```{r number_fig2}
+num_pareto = py$ib_scores_df
+num_detSys = py$ds_scores_df
+num_attested = py$attested_data
+
+num_ag = num_attested %>%
+    group_by(Language) %>%
+    mutate(q = paste0(unlist(q), collapse='')) %>%
+    ungroup() %>%
+    group_by(q) %>%
+    summarise(rate=mean(rate),
+              distortion=mean(distortion),
+              N=n(),
+              lab=first(q))
+
+num_ag2 = num_attested %>%
+    group_by(Language) %>%
+    mutate(q = paste0(unlist(q), collapse='')) %>%
+    ungroup() %>%
+    group_by(q) %>%
+    summarise(rate=mean(rate),
+              distortion=mean(distortion),
+              N=n(),
+              Wn=first(Wn),
+              lab=first(q))
+
+num_attested %>% nrow()
+
+num_frontier = num_pareto %>%
+  ggplot(aes(rate, distortion)) +
+  geom_area(fill='grey60') +
+  geom_line() +
+  geom_point(data=num_detSys %>% mutate(rate = round(rate, 2), distortion = round(distortion, 2)) %>% select(rate, distortion) %>% distinct(), 
+    color='grey80') +
+  geom_point(data=num_ag, aes(size=N)) +
+  ylab('Information Loss') +
+  xlab('Complexity') +
+  theme_classic(base_size = 14) +
+  ggtitle('Number') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_cartesian(ylim=c(0, 1.5), xlim=c(0, 1.8))
+num_frontier
+
+num_frontier_simp = num_detSys %>%
+  mutate(distortion = round(distortion, 2)) %>%
+  select(Wn, distortion) %>%
+  distinct() %>%
+  ggplot(aes(Wn, distortion)) +
+  geom_point(color='grey80') +
+  geom_point(data=num_ag2, aes(size=N)) +
+  ylab('Information Loss') +
+  xlab('Inventory Complexity') +
+  theme_classic(base_size = 14) +
+  ggtitle('Number') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(breaks=1:10)
+num_frontier_simp
+
+```
+
+### Attested vs Possible Prediction
+
+```{r}
+num_systems = num_attested %>% 
+    filter(Language != 'Piraha', Language != 'Kawi') %>%
+    select(rate_round, distortion_round, frontier_dist_round, gNID) %>% distinct() %>%
+    full_join(num_detSys %>% filter(rate > 0) %>%
+                  mutate(rate_round=round(rate,4), distortion_round=round(distortion,4)) %>% 
+                  select(rate_round, distortion_round, front=frontier_dist, gNID)) %>%
+    mutate(System = ifelse(is.na(frontier_dist_round), 'Possible', 'Attested'),
+           frontier_distance_round = ifelse(is.na(frontier_dist_round), round(front, 4), frontier_dist_round))
+
+num_front = num_systems %>%
+    ggplot(aes(x=System, y=frontier_distance_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Distance to Pareto-Front') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+
+num_unif= num_systems %>% 
+    ggplot(aes(x=System, y=rate_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Complexity') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+
+num_div= num_systems %>% 
+    ggplot(aes(x=System, y=distortion_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Information Loss') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+
+num_gNID= num_systems %>% 
+    ggplot(aes(x=System, y=gNID, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Generalized Normalized Information Distance') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+
+(num_unif / num_div / num_front / num_gNID)
+
+```
+
+```{r}
+
+num_systems = num_attested %>% 
+    select(rate_round, distortion_round, frontier_dist_round, gNID) %>% distinct() %>%
+    full_join(num_detSys %>% 
+                  mutate(rate_round=round(rate,4), distortion_round=round(distortion,4)) %>% 
+                  select(X, rate_round, distortion_round, front=frontier_dist, gNID)) %>%
+    mutate(System = ifelse(is.na(frontier_dist_round), 'Possible', 'Attested'),
+           frontier_distance_round = ifelse(is.na(frontier_dist_round), round(front, 4), frontier_dist_round)) 
+
+table(num_systems$System)
+
+######## Formulas
+
+# Complexity Formula
+num_rec_rate <- 
+  recipe(System ~ rate_round, data = num_systems) %>%
+  step_rose(System)
+
+# Information Loss Formula
+num_rec_dist <- 
+  recipe(System ~ distortion_round, data = num_systems) %>%
+  step_rose(System)
+
+# ParetoFront Formula
+num_rec_front <- 
+  recipe(System ~ frontier_distance_round, data = num_systems) %>%
+  step_rose(System)
+
+# gNID Formula
+num_rec_gnid <- 
+  recipe(System ~ gNID, data = num_systems) %>%
+  step_rose(System)
+
+######## Model
+
+num_mod <-
+  logistic_reg() %>%
+  set_engine('glm')
+
+# Workflow
+num_rose_wflw <- 
+  workflow() %>% 
+  add_model(num_mod) 
+num_rose_wflw
+
+######## Evaluation
+
+cv_folds <- vfold_cv(num_systems, strata = "System", repeats = 10)
+
+logliklihood = function(...){ mn_log_loss(..., sum=TRUE)}
+class(logliklihood) <- class(mn_log_loss)
+attr(logliklihood, "direction") <- attr(mn_log_loss, "direction")
+
+######## Fits
+
+# Complexity
+
+num_rose_res_rate <- fit_resamples(
+  num_rose_wflw %>%
+      add_recipe(num_rec_rate), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(num_rose_res_rate)
+
+# Information Loss
+
+num_rose_res_dist <- fit_resamples(
+  num_rose_wflw %>%
+      add_recipe(num_rec_dist), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(num_rose_res_dist)
+
+# ParetoFront
+
+num_rose_res_front <- fit_resamples(
+  num_rose_wflw %>%
+      add_recipe(num_rec_front), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(num_rose_res_front)
+
+
+# gNID
+
+num_rose_res_gnid <- fit_resamples(
+  num_rose_wflw %>%
+      add_recipe(num_rec_gnid), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(num_rose_res_gnid)
+######## Log likelihoods
+
+num_rose_res_rate %>%
+  collect_predictions() %>%
+  mutate(logLike = ifelse(System=='Attested', log(.pred_Attested), log(.pred_Possible))) %>%
+  pull(logLike) %>% sum
+
+num_rose_res_dist %>%
+  collect_predictions() %>%
+  mutate(logLike = ifelse(System=='Attested', log(.pred_Attested), log(.pred_Possible))) %>%
+  pull(logLike) %>% sum
+
+num_rose_res_front %>%
+  collect_predictions() %>%
+  mutate(logLike = ifelse(System=='Attested', log(.pred_Attested), log(.pred_Possible))) %>%
+  pull(logLike) %>% sum
+
+num_rose_res_gnid %>%
+  collect_predictions() %>%
+  mutate(logLike = ifelse(System=='Attested', log(.pred_Attested), log(.pred_Possible))) %>%
+  pull(logLike) %>% sum
+
+```
+
+## Form
+
+### Overall correlation
+
+First we need to extract the optimal lengths for encoders
+
+```{python}
+states = [(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), (1,), (2,), (3,), (2, 3, 4, 5, 6), (3, 4, 5, 6), (4, 5, 6), (6,7,8), (2, 3, 4, 5, 6, 7, 8, 9, 10), (3, 4, 5, 6, 7, 8, 9, 10), (6, 7, 8, 9, 10), (9, 10)]
+feats = ['BARE', 'SG', 'DU', 'TR', 'PAUC', 'PAUC', 'PAUC', 'GPAUC', 'PL', 'PL',  'PL', 'GPL']
+state2feat = {s: f for s, f in zip(states, feats)}
+
+OpLen = []
+for s, q in attested_data['q'].iteritems():
+  mq = mergecols(q)
+  mq = ((mq.T / mq.sum(axis=1)) * p_x).T
+  for c in mq.T:
+    maps = tuple([x[0]+1 for x in np.argwhere(c)])
+    OpLen.append((attested_data['Language'][s].replace('’', "'"), attested_data['Family'][s].replace('’', "'"), state2feat[maps], -np.log2(c.sum())))
+
+opLens = pandas.DataFrame(np.array(OpLen), columns = ['Language', 'Family', 'Meaning', 'OpLen'])
+
+```
+
+
+```{r tense_forms}
+
+dn = read.csv('Data/Number_Forms.csv', stringsAsFactors = F) %>%
+  filter(!is.na(Meaning),
+         Language != 'Tangga',
+         Language != 'Kawi') %>%
+  mutate(Meaning = case_when(
+    Meaning == 'DU_F' ~ 'DU',
+    Meaning == 'TR_F' ~ 'TR',
+    Meaning == 'PAUC_F' ~ 'PAUC',
+    Meaning == 'TR' & Language == 'Manam' ~ 'PAUC',
+    Meaning == 'TR' & Language == 'Yimas' ~ 'PAUC',
+    T ~ Meaning
+  )) %>%
+  filter(!(Language == 'Japanese' & Meaning =='SG'),
+         !(Language == 'Mele-Fila' & Meaning =='GPL'))
+
+
+dni = num_attested %>%
+    select(Language, Distortion=distortion)
+
+attested = dn  %>%
+  left_join(dni) %>%
+  select(Language, Meaning, Form=Form1, Length, Distortion) %>%
+  group_by(Language, Meaning) %>%
+  summarise(Length = mean(Length)) %>%
+  ungroup() %>%
+  left_join(py$opLens %>%
+              mutate(Meaning = case_when(
+                Meaning == 'PL' & Language %in% c('Banyun', 'Fula', 'Hamer', 'Kaytetye', 'Mokilese') ~ 'GPL',
+                Meaning == 'PAUC' & Language %in% c('Banyun', 'Fula', 'Hamer', 'Kaytetye', 'Mokilese') ~ 'PL',
+                Meaning == 'TR' & Language %in% c('Manam') ~ 'PAUC',
+                Meaning == 'GPL' & Language %in% c('Mele-Fila', 'Sursurunga') ~ 'PL',
+                T ~ Meaning
+              ))) %>%
+  group_by(Language) %>%
+  mutate(OpLen  = as.numeric(OpLen),
+         ELength = Length,
+         Length = Length / max(Length),
+         len = OpLen / max(OpLen)) %>%
+  ungroup()
+
+num_form = attested %>%
+    group_by(Meaning) %>%
+    summarise(LengthU = mean(Length) + sd(Length) / sqrt(n()),
+              LengthL = mean(Length) - sd(Length)  / sqrt(n()),
+              Length = mean(Length),
+              lenU = mean(len) + sd(len)  / sqrt(n()),
+              lenL = mean(len) - sd(len)  / sqrt(n()),
+              len = mean(len)
+    ) %>%
+    ungroup() %>%
+    ggplot(aes(Length, len, label=Meaning, color=Meaning)) +
+    stat_smooth(aes(group=Language), method=lm, se=F, color='grey90', alpha=0.01, data=attested) +
+    geom_segment(aes(x=LengthL, xend=LengthU, y=len, yend=len)) +
+    geom_segment(aes(x=Length, xend=Length, y=lenL, yend=lenU)) +
+    geom_text_repel(size=8) +
+    ylab('Optimal Length') +
+    xlab('Observed Length') +
+    ggtitle('Number') +
+    guides(color=F) +
+    theme_classic(base_size = 14)
+num_form
+
+fit_t1 = lmer(Length ~ len + (1|Family) + (1|Language), data=attested)
+summary(fit_t1)
+
+fit_t0 = lmer(Length ~ 1 + (1|Family) + (1|Language), data=attested)
+summary(fit_t0)
+
+anova(fit_t1, fit_t0)
+
+```
+
+### Individual Languages
+
+```{r}
+
+att_corr = attested %>%
+  group_by(Language) %>%
+  summarise(correlation = cor(Length, len)) %>%
+  ungroup() %>% filter(!is.na(correlation))
+
+num_corr = attested %>%
+  left_join(att_corr) %>%
+  mutate(Language = fct_reorder(Language, -correlation)) %>%
+  ggplot(aes(Length, len)) +
+  facet_wrap(~Language, ncol = 7, as.table = T) +
+  stat_smooth(method=lm, se=F,  color='grey70', alpha=0.01) +
+  geom_text_repel(aes(label=Meaning)) +
+  geom_label(aes(x=0.1, y=1, label=round(correlation, 2))) +  
+  ggtitle('Number') +
+  ylab('Optimal Length') +
+  xlab('Observed Length') +
+  theme_classic(base_size = 10) +
+  theme(aspect.ratio = 1)
+num_corr
+
+```

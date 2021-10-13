@@ -1,0 +1,711 @@
+---
+title: "Evidentiality Continous Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reticulate)
+use_python("/usr/bin/python3", required = TRUE)
+
+library(tidyverse)
+library(patchwork)
+library(ggrepel)
+library(ggridges)
+library(tidymodels)
+library(themis)
+
+set.seed(1234)
+```
+
+```{r plot_guides}
+ev_scale = scale_fill_manual(values=c('#be29ec', '#d896ff', '#ae0001', '#d67f80', '#008080', '#66b2b2'))
+evr_scale = scale_fill_manual(values=rev(c('#be29ec', '#d896ff', '#ae0001', '#d67f80', '#008080', '#66b2b2')))
+```
+
+# Evidentiality
+
+Let's make some channel codes for existing languages.
+
+```{python evid_channels}
+import pandas
+import numpy as np
+from ibhelpers import *
+from collections import namedtuple
+from scipy.spatial import distance
+
+bacondatapath =  '../Data/Evidentiality_Meanings.csv'
+
+bd =  pandas.read_csv(bacondatapath)
+
+def present(x):
+    x =  str(x)
+    x = str.split(x, ';')[0]
+    return  (x in ['a', 'b', 'c', 'd', 'e', 'f'])
+
+
+def extract_cats(td):
+    cats = []
+    if present(td.V):
+        cats.append([0])
+    if present(td.S):
+        cats.append([1])
+    if present(td.I):
+        cats.append([2])
+    if present(td.A):
+        cats.append([3])
+    if present(td.H):
+        cats.append([4])
+    if present(td.Q):
+        cats.append([5])
+    if present(td.VS):
+        cats.append([0,1])
+    if present(td.IH):
+        cats.append([2,4])
+    if present(td.IA):
+        cats.append([2,3])
+    if present(td.HQ):
+        cats.append([4,5])
+    if present(td.VSI):
+        cats.append([0,1,2])
+    if present(td.IAHQ):
+        cats.append([2,3,4,5])
+    if present(td.SIAHQ):
+        cats.append([1,2,3,4,5])
+    
+    return cats
+
+ef = extract_cats
+n = 6
+
+bd['categories'] = bd.apply(ef,  axis=1)
+bd = bd[['Language', 'Family', 'Source', 'categories']]
+
+def unpackoutputs(row):
+    row['q'], row['lens']= cats2q(row['categories'], n)
+    return row
+
+bd = bd.apply(unpackoutputs, axis=1)
+bd['ind'] = range(bd.shape[0])
+
+```
+
+Now let's specify the meanings P(xy) and the need probability P(x).
+
+```{python evid_specification}
+# Quechua split evenly
+p_x =  np.array([0.4658, 0.4658, 0.0103, 0.0103, 0.0239, 0.0239])
+p_x = p_x / np.sum(p_x)
+
+items = ['v', 's', 'i', 'a', 'h', 'q']
+
+eps = 0.01
+q0 = (1 - eps) * np.eye(6) + eps * np.ones((6, 6))
+
+kap = 0.5
+lam = 0.1
+p_xGy = np.array(
+    [[1, kap, kap*lam, kap**2 * lam, kap**2 * lam**2, kap**3 * lam**2],  # V
+     [kap, 1, lam, kap*lam, lam**2 * kap, lam**2 * kap**2],  # S
+     [kap*lam, lam, 1, kap, lam*kap, lam*kap**2],  # I
+     [kap**2 *lam, kap*lam, kap, 1, lam, lam*kap],  # A
+     [kap**2 * lam**2, kap * lam**2, kap*lam, lam, 1, kap],  # H
+     [kap**3 * lam**2, kap**2 * lam**2, kap**2 *lam, kap*lam, kap, 1]]) #Q        
+
+p_mGs = p_xGy / np.sum(p_xGy, axis=0)
+p_xGy = p_xGy / p_xGy.sum(axis=1, keepdims=True)
+p_xy = p_xGy * p_x[:, np.newaxis]
+p_xy = p_xy / np.sum(p_xy)
+
+```
+
+Let's score the attested systems
+
+```{python evid_attested}
+attested_data = bd
+attested_data = attested_data.dropna()
+attested_data['rate'] = 0
+attested_data['distortion'] = 0
+attested_data['exp_len'] = 0
+attested_data['lab'] = ''
+attested_perm_zc_scores= []
+npitems = np.array(items)
+
+for i in attested_data['ind']:
+    q = attested_data.loc[i,'q']
+    nat = naturalness(q, p_mGs)
+    result = score_q_kl(p_xy, q)
+    attested_data.loc[i,  'rate']  = result.rate
+    attested_data.loc[i,  'distortion'] = result.distortion
+    attested_data.loc[i,  'naturalness'] = np.sum(nat)
+    lens = attested_data.loc[i, 'lens']
+    attested_data.loc[i, 'exp_len'] = exp_len(q, p_x, lens)
+    nc = len(attested_data.loc[i, 'categories'])
+    attested_data.loc[i,  'n'] = nc
+    attested_data.loc[i,  'lab'] = zmlabel(attested_data.loc[i, 'categories'], attested_data.loc[i,'lens'], npitems)
+    attested_data.loc[i,  'zlab'] = zlabel(attested_data.loc[i, 'categories'], npitems)
+    for j in np.arange(-1, nc):
+        l  = make_lens(j, nc, n)
+        e_len = exp_len(q, p_x, l)
+        attested_perm_zc_scores.append( (result.rate, result.distortion, e_len))
+
+```
+
+Let's generate some possible systems
+
+Permutations
+
+```{python}
+from itertools import permutations
+
+
+def full_sorted(x):
+    x = map(sorted, x)
+    return sorted(x, key=lambda y: y[0])
+
+
+def translate(system, perm):
+    key = dict()
+    for k, v in enumerate(perm):
+        key[k] = v
+    new_cats = []
+    for cat in system:
+        new_cat = []
+        for o in cat:
+            new_cat.append(key[o])
+        new_cats.append(new_cat)
+    return new_cats
+
+
+def check_contig(key):
+  tot = 0
+  for categ in key:
+    cat = list(categ)
+    cat.sort()
+    tally = 0
+    for i, c in enumerate(cat):
+      if c == cat[0]+i:
+        tally += 1
+    if tally == len(cat):
+      tot += 1
+  if tot == len(key):
+    return True
+  else:
+    return False
+
+
+perms = dict()
+for p in permutations([0,1,2,3,4,5]):
+    seen = set()
+    for a in attested_data['categories']:
+        if tuple(map(tuple, a)) not in seen:
+            seen.add(tuple(map(tuple, a)))
+            t = translate(a, p)
+            if tuple(map(tuple, full_sorted(t))) not in perms.keys():
+                perms[tuple(map(tuple, map(sorted, t)))] = t
+
+ps_scores = []
+ps_scores_explen = []
+pqs = []
+ps_names = []
+ps_cats = []
+for pk, ps in perms.items():
+  if check_contig(pk):
+    q = partition2q(ps)
+    pqs.append(q)
+    nat = naturalness(q, p_mGs)
+    result = score_q_kl(p_xy, q)
+    ps_scores.append( (result.rate, result.distortion, np.sum(nat)) )
+    ps_names.append(pk)
+    ps_cats.append(ps)
+    nc = len(ps)
+    for i in np.arange(-1, nc):
+        l  = make_lens(i, nc, n)
+        e_len = exp_len(q, p_x, l)
+        ps_scores_explen.append( (result.rate, result.distortion, e_len))
+
+```
+
+Partitions
+
+```{python evid_possible}
+# deterministic systems with item labels
+detsystems = list(partition(items))
+# deterministic systems with item indices
+iteminds=list(range(len(items)))
+detsysteminds = list(partition(iteminds))
+
+# score deterministic systems
+ds_scores = []
+ds_scores_explen = []
+dqs = []
+ds_cats = []
+syslabs = []
+for ds, dlab in zip(detsysteminds, detsystems):
+  if check_contig(ds):
+    q = partition2q(ds)
+    dqs.append(q)
+    nat = naturalness(q, p_mGs)
+    result = score_q_kl(p_xy, q)
+    ds_scores.append( (result.rate, result.distortion, np.sum(nat)))
+    ds_cats.append(ds)
+    syslabs.append(dlab)
+    nc = len(ds)
+    for i in np.arange(-1, nc):
+        l  = make_lens(i, nc, n)
+        e_len = exp_len(q, p_x, l)
+        ds_scores_explen.append( (result.rate, result.distortion, e_len))
+
+# make labels for deterministic systems
+syslabels = [partition_label(p) for p in syslabs]
+```
+
+Calculate the frontier
+
+```{python evid_ib}
+# trace out optimal frontier
+q0 = q0 / q0.sum(axis=1, keepdims=True)
+betas = np.array([2.0 ** x for x in np.arange(5, 0, -0.001)])
+focalbeta = 5.3
+
+q, beta, ibscores, qresult, qseq, qseqresults, allqs = fit_ib(p_xy, q0, focalbeta, betas, verbose=1)
+```
+
+Calculate the distance metrics
+
+```{python evid_postProcess}
+ib_scores_df = pandas.DataFrame(np.array(ibscores), columns = ['rate', 'distortion', 'elen'])
+ib_scores_df['beta'] = betas
+ib_scores_df['q'] = allqs
+ib_scores_df['Wn'] = [mergecols(q).shape[1] for q in ib_scores_df['q']]
+
+
+# compute distance from optimal frontier
+def fd(asys, ibscores):
+    mind = distance.cdist([[asys['rate'], asys['distortion']]], ibscores[['rate', 'distortion']]).min()
+    return mind
+
+
+def gNID_d(asys, paretoQs, betas, pX):
+    mind = np.zeros((len(asys), len(paretoQs)))
+    for li in range(len(asys)):
+        for qi, q in enumerate(paretoQs):
+            mind[li, qi] = gNID(asys.iloc[li]['q'], q, pX)
+    return np.argmin(mind, axis=1), np.min(mind, axis=1), betas[np.argmin(mind, axis=1)]
+
+
+attested_data['frontier_dist'] = attested_data.apply(fd,  args = (ib_scores_df,), axis=1)
+attested_data['rate_round'] = np.round(attested_data['rate'], 4)
+attested_data['distortion_round'] = np.round(attested_data['distortion'], 4)
+attested_data['frontier_dist_round'] = np.round(attested_data['frontier_dist'], 4)
+attested_data['exp_len_round'] = np.round(attested_data['exp_len'], 4)
+_, attested_data['gNID'], attested_data['gNID_beta']  = gNID_d(attested_data, allqs, betas, p_x)
+attested_data['Wn'] = [mergecols(q).shape[1] for q in attested_data['q']]
+
+ds_scores_df = pandas.DataFrame(np.array(ds_scores), columns = ['rate', 'distortion', 'naturalness'])
+ds_scores_df['name'] = np.array(syslabels)
+ds_scores_df['categories'] = np.array(ds_cats)
+ds_scores_df['q'] = dqs
+ds_scores_df['n'] = ds_scores_df['categories'].apply(lambda x: len(x))
+ds_scores_df['rate_round'] = np.round(ds_scores_df['rate'], 4)
+ds_scores_df['distortion_round'] = np.round(ds_scores_df['distortion'], 4)
+ds_scores_df['frontier_dist'] = ds_scores_df.apply(fd,  args = (ib_scores_df,), axis=1)
+_, ds_scores_df['gNID'], ds_scores_df['gNID_beta']  = gNID_d(ds_scores_df, allqs, betas, p_x)
+ds_scores_df['Wn'] = [mergecols(q).shape[1] for q in ds_scores_df['q']]
+
+ps_scores_df = pandas.DataFrame(np.array(ps_scores), columns = ['rate', 'distortion', 'naturalness'])
+ps_scores_df['name'] = np.array(ps_names)
+ps_scores_df['categories'] = np.array(ps_cats)
+ps_scores_df['q'] = pqs
+ps_scores_df['n'] = ps_scores_df['categories'].apply(lambda x: len(x))
+ps_scores_df['rate_round'] = np.round(ps_scores_df['rate'], 4)
+ps_scores_df['distortion_round'] = np.round(ps_scores_df['distortion'], 4)
+ps_scores_df['frontier_dist'] = ps_scores_df.apply(fd,  args = (ib_scores_df,), axis=1)
+_, ps_scores_df['gNID'], ps_scores_df['gNID_beta']  = gNID_d(ps_scores_df, allqs, betas, p_x)
+ps_scores_df['Wn'] = [mergecols(q).shape[1] for q in ps_scores_df['q']]
+
+ds_scores_explen_df = pandas.DataFrame(np.array(ds_scores_explen), columns = ['rate', 'distortion', 'exp_len'])
+ps_scores_explen_df = pandas.DataFrame(np.array(ps_scores_explen), columns = ['rate', 'distortion', 'exp_len'])
+attested_perm_zc_df = pandas.DataFrame(np.array(attested_perm_zc_scores), columns = ['rate', 'distortion', 'exp_len'])
+
+ds_scores_df.to_csv('../Output/Evidentiality/detSys_cont.csv')
+ds_scores_explen_df.to_csv('../Output/Evidentiality/detSysELen_cont.csv')
+ps_scores_df.to_csv('../Output/Evidentiality/permSys_cont.csv')
+ps_scores_explen_df.to_csv('../Output/Evidentiality/permSysELen_cont.csv')
+
+```
+
+Let's plot the pareto-frontier
+
+```{r evid_fig2}
+evid_pareto = py$ib_scores_df
+evid_detSys = py$ds_scores_df
+evid_permSys = py$ps_scores_df
+evid_detSysLen = py$ds_scores_explen_df
+evid_attested =  py$attested_data
+evid_attestedLen = py$attested_perm_zc_df
+
+evid_ag = evid_attested %>%
+  group_by(zlab) %>%
+  summarise(rate=mean(rate), 
+            distortion=mean(distortion), 
+            N=n(), 
+            lab=first(zlab))
+
+evid_ag2 = evid_attested %>%
+    group_by(Language) %>%
+    mutate(q = paste0(unlist(q), collapse='')) %>%
+    ungroup() %>%
+    group_by(q) %>%
+    summarise(rate=mean(rate),
+              distortion=mean(distortion),
+              N=n(),
+              Wn=first(Wn),
+              lab=first(q))
+
+evid_attested %>% pull(Language) %>% unique() %>% length()
+
+evid_frontier = evid_pareto %>%
+  ggplot(aes(rate, distortion)) +
+  geom_area(fill='grey60') +
+  geom_line() +
+  geom_point(data=evid_detSys, color='grey80') +
+  geom_point(data=evid_permSys, color='darkorchid1', alpha=0.3) +
+  geom_point(data=evid_ag, aes(size=N)) +
+  ylab('Information Loss') +
+  xlab('Complexity') +
+  theme_classic(base_size = 14) +
+  ggtitle('Evidentiality') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_cartesian(ylim=c(0, 0.5), xlim=c(0, 1.6))
+evid_frontier
+
+evid_frontier_simp = evid_detSys %>%
+  select(Wn, distortion) %>%
+  distinct() %>%
+  ggplot(aes(Wn, distortion)) +
+  geom_point(color='grey80') +
+  geom_point(data=evid_permSys, color='darkorchid1', alpha=0.3) +
+  geom_point(data=evid_ag2, aes(size=N)) +
+  ylab('Information Loss') +
+  xlab('Inventory Complexity') +
+  theme_classic(base_size = 14) +
+  ggtitle('Evidentiality') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(breaks=1:6)
+evid_frontier_simp
+
+evid_systems = evid_attested %>% 
+    filter(zlab != '(vsiahq)') %>%
+    select(zlab, rate_round, distortion_round, frontier_dist_round, gNID) %>% distinct() %>%
+    full_join(evid_detSys %>% select(name, rate_round, distortion_round, front=frontier_dist, gNID) %>% filter(name != '(vsiahq)')) %>%
+    mutate(System = ifelse(is.na(frontier_dist_round), 'Possible', 'Attested'),
+           frontier_distance_round = ifelse(is.na(frontier_dist_round), round(front, 4), frontier_dist_round))
+
+evid_psystems = evid_attested %>% 
+    filter(zlab != '(vsiahq)') %>%
+    select(zlab, rate_round, distortion_round, frontier_dist_round, gNID) %>% distinct() %>%
+    full_join(evid_permSys %>% select(name, rate_round, distortion_round, front=frontier_dist, gNID) %>% filter(name != '(vsiahq)')) %>%
+    mutate(System = ifelse(is.na(frontier_dist_round), 'Permuted', 'Attested'),
+           frontier_distance_round = ifelse(is.na(frontier_dist_round), round(front, 4), frontier_dist_round))
+
+evid_front = evid_systems %>%
+    ggplot(aes(x=System, y=frontier_distance_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Distance to Pareto-Front') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+evid_front
+
+evid_pfront = evid_psystems %>%
+    ggplot(aes(x=System, y=frontier_distance_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Distance to Pareto-Front') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+evid_pfront
+
+evid_gNID = evid_systems %>%
+    ggplot(aes(x=System, y=gNID, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Generalized Normalized Information Distance') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+evid_gNID
+
+evid_pgNID = evid_psystems %>%
+    ggplot(aes(x=System, y=gNID, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Generalized Normalized Information Distance') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+evid_pgNID
+
+evid_unif= evid_systems %>% 
+    ggplot(aes(x=System, y=rate_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Complexity') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+evid_unif
+
+evid_punif= evid_psystems %>% 
+    ggplot(aes(x=System, y=rate_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Complexity') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+evid_punif
+
+evid_div= evid_systems %>% 
+    ggplot(aes(x=System, y=distortion_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Information Loss') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+evid_div
+
+evid_pdiv= evid_psystems %>% 
+    ggplot(aes(x=System, y=distortion_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Information Loss') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+evid_pdiv
+
+(evid_unif + evid_punif) / (evid_div + evid_pdiv) / (evid_front + evid_pfront) / (evid_gNID + evid_pgNID)
+
+```
+
+## Deterministic
+
+```{r}
+
+# Load data
+ev_detSys = py$ds_scores_df
+ev_attested = py$attested_data
+
+ev_systems = ev_attested %>% 
+    select(rate_round, distortion_round, frontier_dist_round, gNID) %>% distinct() %>%
+    full_join(ev_detSys %>% 
+                  mutate(rate_round=round(rate,4), distortion_round=round(distortion,4)) %>% 
+                  select(rate_round, distortion_round, front=frontier_dist, gNID)) %>%
+    mutate(System = ifelse(is.na(frontier_dist_round), 'Permuted', 'Attested'),
+           frontier_distance_round = ifelse(is.na(frontier_dist_round), round(front, 4), frontier_dist_round)) 
+
+table(ev_systems$System)
+
+######## Formulas
+
+# Complexity Formula
+ev_rec_rate <- 
+  recipe(System ~ rate_round, data = ev_systems) %>%
+  step_rose(System)
+
+# Information Loss Formula
+ev_rec_dist <- 
+  recipe(System ~ distortion_round, data = ev_systems) %>%
+  step_rose(System)
+
+# Paretofront Formula
+ev_rec_front <- 
+  recipe(System ~ frontier_distance_round, data = ev_systems) %>%
+  step_rose(System)
+
+# GNID
+ev_rec_gnid <- 
+  recipe(System ~ gNID, data = ev_systems) %>%
+  step_rose(System)
+
+######## Model
+
+ev_mod <-
+  logistic_reg() %>%
+  set_engine('glm')
+
+# Workflow
+ev_rose_wflw <- 
+  workflow() %>% 
+  add_model(ev_mod) 
+
+######## Evaluation
+
+# Set up 10-fold Cross Validation
+cv_folds <- vfold_cv(ev_systems, strata = "System", repeats = 10)
+
+# Definte the loss function as the log likelihood
+logliklihood = function(...){ mn_log_loss(..., sum=TRUE)}
+class(logliklihood) <- class(mn_log_loss)
+attr(logliklihood, "direction") <- attr(mn_log_loss, "direction")
+
+######## Fits
+
+# Complexity
+
+ev_rose_res_rate <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_rate), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_rate)
+
+# Information Loss
+
+ev_rose_res_dist <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_dist), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_dist)
+
+# Paretofront
+
+ev_rose_res_front <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_front), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_front)
+
+# GNID
+
+ev_rose_res_gnid <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_gnid), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_gnid)
+
+```
+
+# Permuted
+
+```{r}
+
+# Load data
+ev_detSys = py$ps_scores_df
+
+ev_systems = ev_attested %>% 
+    select(rate_round, distortion_round, frontier_dist_round, gNID) %>% distinct() %>%
+    full_join(ev_detSys %>% 
+                  mutate(rate_round=round(rate,4), distortion_round=round(distortion,4)) %>% 
+                  select(rate_round, distortion_round, front=frontier_dist, gNID)) %>%
+    mutate(System = ifelse(is.na(frontier_dist_round), 'Permuted', 'Attested'),
+           frontier_distance_round = ifelse(is.na(frontier_dist_round), round(front, 4), frontier_dist_round)) 
+
+table(ev_systems$System)
+
+######## Formulas
+
+# Complexity Formula
+ev_rec_rate <- 
+  recipe(System ~ rate_round, data = ev_systems) %>%
+  step_rose(System)
+
+# Information Loss Formula
+ev_rec_dist <- 
+  recipe(System ~ distortion_round, data = ev_systems) %>%
+  step_rose(System)
+
+# Paretofront Formula
+ev_rec_front <- 
+  recipe(System ~ frontier_distance_round, data = ev_systems) %>%
+  step_rose(System)
+
+# GNID
+ev_rec_gnid <- 
+  recipe(System ~ gNID, data = ev_systems) %>%
+  step_rose(System)
+
+######## Model
+
+ev_mod <-
+  logistic_reg() %>%
+  set_engine('glm')
+
+# Workflow
+ev_rose_wflw <- 
+  workflow() %>% 
+  add_model(ev_mod) 
+
+######## Evaluation
+
+# Set up 10-fold Cross Validation
+cv_folds <- vfold_cv(ev_systems, strata = "System", repeats = 10)
+
+# Definte the loss function as the log likelihood
+logliklihood = function(...){ mn_log_loss(..., sum=TRUE)}
+class(logliklihood) <- class(mn_log_loss)
+attr(logliklihood, "direction") <- attr(mn_log_loss, "direction")
+
+######## Fits
+
+# Complexity
+
+ev_rose_res_rate <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_rate), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_rate)
+
+# Information Loss
+
+ev_rose_res_dist <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_dist), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_dist)
+
+# Paretofront
+
+ev_rose_res_front <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_front), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_front)
+
+# GNID
+
+ev_rose_res_gnid <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_gnid), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_gnid)
+
+```

@@ -1,0 +1,98 @@
+The data files have the following format.
+
+The tables have columns for Language, Family, Source and Comments. Then for each domain, the unique meaning partitions required to code the languages recieve a column. 
+For number and evidentiality, the value of the partition columns signifies presence of the category.
+For tense, the value of the partition columns is taken from Dahl (1985) and reflects how the partition is realized in the language (e.g., implicitly).
+
+Number_Table_r.csv
+    Specification::
+        Language:
+        Family: Language Family from Glottolog
+        Source: Most reliable citation for our coding 
+        BARE: (123456789)
+        SG: (1)
+        DU: (2)
+        TR: (3)
+        PAUC2: (23456)
+        PAUC3: (3456)
+        PAUC4: (456)
+        GPAUC: (678)
+        PL2: (23456789)
+        PL3: (3456789)
+        PL6: (6789)
+        PL8: (89)
+        Comments:
+
+
+Tense_Table.csv
+    Specification::
+        Language: 
+        Family: Language Family from Glottolog
+        Source: Most reliable citation for our coding 
+        remote_past: (A)
+        recent_past: (B)
+        immediate_past: (C)
+        past_wo_remote : past without remote (BC)
+        past: (ABC)
+        present: (R)
+        immediate_future: (X)
+        remote_future: (Z)
+        future: (XYZ)
+        non_past: (RXYZ)
+        non_future: (ABCR)
+        pre_hodiernal: (AB)
+        Comments:
+
+
+Evidentiality_Table.csv
+    Specification::
+        Language: 
+        Family: Language Family from Glottolog
+        Source: Most reliable citation for our coding 
+        A: Assumed
+        H: Hearsay
+        HQ: Reported (Hearsay & Quoted)
+        I: Inferred
+        IA: Indirect Evidence (Inferred & Assumed)
+        IAHQ: Non-Firsthand (Inferred, Assumed, Hearsay & Quoted)
+        IH: Inferred & Hearsay
+        Q: Quoted
+        S: Sensory (non-visual)
+        SIAHQ: Non-Visual (Sensory, Inferred, Assumed, Hearsay & Quoted)
+        V: Visual
+        VS: Direct Evidence (Visual & Sensory)
+        VSI: Direct Evidence (Visual & Sensory) & Inferences 
+        Comments:
+
+
+The form data have a separate format: Language, Meaning, Form.
+For number there are two different files, NumberForms.csv contains the data we use in our analyses (nominal and pronominal forms). Number_Forms.csv contains a broader survey of how languages encode number information (e.g., subject-verb agreement).
+
+NumberForms.csv
+    Specification::
+        Language:
+        Meaning: The meaning interval defined using standard linguistic labels (BARE, SG, DU, TR, PAUC, GPAUC, PL)
+        Form: Romanized script
+        Form1: Romanized script removing punctuation
+        Length: Number of characters of Form1
+
+
+Forms.csv
+    Specification::
+        Language:
+        Domain: Tense or Evidentiality
+        Meaning: The meaning interval defined using abcrxyz for tense or vsiahq for evidentiality
+        Form: Romanized script
+
+
+Number_Forms.csv
+    Compiled by Naomi Baes.
+    Specification::
+        Language:
+        Domain: Number
+        Source: Citation for our coding
+        Meaning: The meaning interval defined using standard linguistic labels (BARE, SG, DU, TR, PAUC, GPAUC, PL)
+        Syntax: The syntactic position of the marking (pronominal, nominal, determiner, demonstrative, adjective agreement, subject-verb agreement)
+        Form: Romanized script
+        Comments:
+

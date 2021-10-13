@@ -1,0 +1,44 @@
+Feature,Descrption
+remote_past,The language possesses a tense marker for the remote past (A)
+recent_past,The language possesses a tense marker for the recent past (B)
+immediate_past,The language possesses a tense marker for the immediate past ©
+past_wo_remote,The language possesses a tense marker for the non-remote past (BC)
+past,The language possesses a tense marker for the past (ABC)
+present,The language possesses a tense marker for the present ®
+immediate_future,The language possesses a tense marker for the immediate future (X)
+remote_future,The language possesses a tense marker for the remote future (YZ)
+future,The language possesses a tense marker for the future (XYZ)
+non_past,The language possesses a tense marker for the non-past (RXYZ)
+non_future,The language possesses a tense marker for the non-future (ABCR)
+pre_hodiernal,The language possesses a tense marker for pre-hodiernal (AB)
+A,The remote past
+B,The recent past
+C,The immediate past
+R,The present
+X,The immediate future
+Y,The near future
+Z,The remote future
+BARE,The language possesses a bare number marker (1-10)
+SG,The language possesses a singular number marker (1)
+DU,The language possesses a dual number marker (2)
+TR,The language possesses a trial number marker (3)
+PAUC2,The language possesses a paucal number marker (2-6)
+PAUC3,The language possesses a paucal number marker (3-6)
+PAUC4,The language possesses a paucal number marker (4-6)
+GPAUC,The language possesses a greater paucal number marker (6-8)
+PL2,The language possesses a plural number marker (2-10)
+PL3,The language possesses a plural number marker (3-10)
+PL6,The language possesses a plural number marker (6-10)
+PL8,The language possesses a plural number marker (8-10)
+PL,Plural marker
+DU_F,Facultative Dual marker
+PAUC,Paucaul marker
+GPL,Greater Paucal marker
+PAUC_F,Facultative Paucal marker
+TR_F,Facultative Trial marker
+A,Assumed evidential marker
+H,Hearsay evidential marker
+I,Inference evidential marker
+Q,Reported evidential marker
+S,Sensory evidential marker
+V,Visual evidential marker
