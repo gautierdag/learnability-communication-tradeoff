@@ -32,8 +32,6 @@ def ensure_file(file_name, url):
 
 
 # === DISTRIBUTIONS ===
-
-
 def marginal(pXY, axis=1):
     """:return pY (axis = 0) or pX (default, axis = 1)"""
     return pXY.sum(axis)
@@ -73,8 +71,6 @@ def softmax(dxy, beta=1, axis=None):
 
 
 # INFORMATIONAL MEASURES
-
-
 def xlogx(v):
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(v > PRECISION, v * np.log2(v), 0)
@@ -111,8 +107,6 @@ def gNID(pW_X, pV_X, pX):
 
 
 # COLOR TRANSFORMATIONS
-
-
 def lab2rgb(x):
     if len(x.shape) == 2:
         return color.lab2rgb(x[None])[0]
