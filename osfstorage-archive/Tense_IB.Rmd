@@ -74,7 +74,7 @@ p_xGy = np.array(
 p_mGs = p_xGy / np.sum(p_xGy, axis=0)
 p_xGy = p_xGy / p_xGy.sum(axis=1, keepdims=True)
 p_xy = p_xGy * p_x[:, np.newaxis]
-p_xy = p_xy / np.sum(p_xy)
+p_xy = p_xy / np.sum(p_xy) 
 
 ```
 
@@ -131,7 +131,7 @@ Now let's run the Information Bottleneck Method
 
 ```{python tense_ib}
 # trace out optimal frontier
-q0 = q0 / q0.sum(axis=1, keepdims=True)
+q0 = q0 / q0.sum(axis=1, keepdims=True) # q0 initial encoder - can set it to identity
 betas = np.array([2.0 ** x for x in np.arange(5, 0, -0.001)])
 focalbeta = 5.3
 

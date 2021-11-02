@@ -1,9 +1,6 @@
 """
 The Blahut-Arimoto algorithm for solving the rate-distortion problem.
 """
-
-from __future__ import division
-
 from dit.rate_distortion.blahut_arimoto import _blahut_arimoto
 
 import numpy as np

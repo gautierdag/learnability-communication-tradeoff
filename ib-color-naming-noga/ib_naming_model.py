@@ -65,6 +65,10 @@ class IBNamingModel(object):
         pWU = pMW.T @ self.pU_M
         return MI(pWU)
 
+    # def information_loss(self, pW_M):
+    #     DKL(self.pM, pW_M)
+    #     return
+
     def d_IB(self, pW_M):
         """
         :param pW_M: encoder (naming system)
