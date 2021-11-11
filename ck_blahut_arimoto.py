@@ -101,9 +101,13 @@ def ck_blahut_arimoto_ib(
         d(x, t) = D[ p(Y|x) || q(Y|t) ]
         """
         q_y_t = next_q_y_t(q_t_x)
-        distortions = np.asarray(
-            [divergence(a, b) for a in p_y_x for b in q_y_t]
-        ).reshape(q_y_t.shape)
+        if divergence == "entropy":
+            lq_y_t = np.log2(q_y_t)
+            distortions = np.array([-np.nansum(row * lq_y_t, axis=1) for row in p_y_x])
+        else:
+            distortions = np.asarray(
+                [divergence(a, b) for a in p_y_x for b in q_y_t]
+            ).reshape(q_y_t.shape)
         return distortions
 
     rd, q_xt = _blahut_arimoto(
