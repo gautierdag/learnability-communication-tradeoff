@@ -57,8 +57,10 @@ for i, (language, elicitations) in enumerate(progress):
     pC_W = np.array(pC_W)
 
     ### COMPUTE p(w, c|h) ###
-    pW_H = (elicitations["word"].value_counts() / N).to_numpy().reshape((W, 1))
+    # TODO: This definition is not the same as Eq. 12?
+    pW_H = 1  # (elicitations["word"].value_counts() / N).to_numpy().reshape((W, 1))
     pWC_H = pC_W * pW_H
+
     pC_H = pWC_H.sum(axis=0)
     pW_CH = pWC_H / pC_H
 
@@ -67,6 +69,7 @@ for i, (language, elicitations) in enumerate(progress):
     ### COMPUTE p(c) IF DOESNT EXIST ###
     plC = None
     if pC is None:
+        #TODO: Are these arguments correct?
         _, q_wct = ck_blahut_arimoto_ib(pWC_H, 1, pW_CH, "entropy")
         plC = q_wct.sum(axis=0).sum(axis=1)
 
@@ -76,6 +79,7 @@ for i, (language, elicitations) in enumerate(progress):
         plC,
         pC_W,
         pW_H,
+        pH,
         (mu, cov)
     ))
 
@@ -107,7 +111,7 @@ if pC is None:
 
 
 for model in models:
-    _, N, plC, pC_W, pW_H, _ = model
+    _, N, plC, pC_W, pW_H, pH, _ = model
     pWC_H = pC_W * pW_H
     pC_H = pWC_H.sum(axis=0)
 
