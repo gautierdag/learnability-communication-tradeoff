@@ -1,6 +1,8 @@
 import pickle
 import os
-from typing import Tuple, List
+import argparse
+from dataclasses import dataclass
+from typing import Tuple, List, Optional
 
 import pandas as pd
 import numpy as np
@@ -10,8 +12,6 @@ from scipy.stats import expon, beta, multivariate_normal
 from ck_blahut_arimoto import ck_blahut_arimoto_ib
 from tqdm import tqdm
 
-np.seterr(divide='ignore')
-
 
 def fit_gaussians(data: pd.DataFrame, cov_reg: float = 1e-5) \
         -> Tuple[np.ndarray, List[Tuple[str, np.ndarray, np.ndarray]]]:
@@ -20,6 +20,9 @@ def fit_gaussians(data: pd.DataFrame, cov_reg: float = 1e-5) \
     Args:
         data: Data points of colour term and colour stimulus observations
         cov_reg: The covariance regularisation constant
+
+    Returns:
+        Tuple of the conditional distribution p(C|W) and the gaussian model params for each w in W
     """
     # By fitting conditional Gaussians compute the distribution p(C|W)
     pc_w = []
@@ -45,7 +48,7 @@ def learn_language(data: pd.DataFrame) -> np.ndarray:
         data: Data containing all observations of colour terms and stimuli for the language
 
     Returns:
-        The distribution p(W, C|H)
+        The distribution p(W, C)
     """
     # Compute p(C|W)
     pc_w, models = fit_gaussians(data)
@@ -76,7 +79,7 @@ def plot_gaussians(data: pd.DataFrame, models: List[Tuple[str, np.ndarray, np.nd
 
     for i, (ct, subset) in enumerate(data.groupby("word")):
         subset = subset[vars_name]
-        x_data, y_data = subset[vars_name[0]],  subset[vars_name[1]]
+        x_data, y_data = subset[vars_name[0]], subset[vars_name[1]]
         x_min, x_max = x_data.min() - 1, x_data.max() + 1
         y_min, y_max = y_data.min() - 1, y_data.max() + 1
 
@@ -105,114 +108,150 @@ def plot_gaussians(data: pd.DataFrame, models: List[Tuple[str, np.ndarray, np.nd
     return axis
 
 
-def sample_from_prior(pC, data, nk):
-    if pC is None:
-        return data
-
-    return data.sample(nk, replace=True, weights=pC, axis=0, random_state=42, ignore_index=True)
-
-
-color_data_integer = pd.read_csv("wcs/term.txt", sep="\t", names=["language", "speaker", "chip", "word"])
-lang_id_lang = pd.read_csv("wcs/lang.txt", sep="\t", usecols=[0, 1], index_col=0, names=["id", "language"])
-chip_data = pd.read_csv("wcs/chip.txt", sep="\t", index_col=0, names=["row", "col", "pos"])
-
-chip2lab = pd.read_csv("wcs/cnum-vhcm-lab-new.txt", sep="\t", header=0, index_col="#cnum")
-chip2lab = chip2lab.sort_values(by="#cnum")[["L*", "a*", "b*"]]
-color_data_integer = color_data_integer.merge(chip2lab, left_on="chip", right_on="#cnum", how="left")
-covariance_prior = color_data_integer[["L*", "a*", "b*"]].cov().to_numpy()
-
-C = 330  # Number of colour chips
-
-inf_loss = []
-complexity = []
-progress = tqdm(color_data_integer.groupby('language'))
-
-pC = None
-if os.path.exists("pC.p"):
-    pC = pickle.load(open("pC.p", "rb"))
+@dataclass
+class Model:
+    lang_id: int
+    lang_str: str
+    n_obs: int
+    n_words: int
+    pwc_h: np.ndarray
+    plc: Optional[np.ndarray]
 
 
-# Array to store fitted model params
-models = []
+if __name__ == '__main__':
+    np.seterr(divide='ignore')
+    np.random.seed(42)
 
-for i, (language, elicitations) in enumerate(progress):
-    nd = elicitations.shape[0]  # Number of datapoints for this language
-    nw = elicitations["word"].nunique()  # Number of unique colour terms
-    lang_str = lang_id_lang.loc[language]["language"]  # human-readable name for the language
-    k = 1 if pC is not None else 1  # The number of division to test
-    for n in np.linspace(5, nd, k, dtype=int):
-        if k == 1:
-            sample = elicitations
-        else:
-            sample = sample_from_prior(pC, elicitations[:C], n)
-        pWC_H, ms = learn_language(sample)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n_min", type=int, help="The minimum number of samples to draw for each language.",
+                        default=1)
+    parser.add_argument("--n_step", type=int, help="The step rate of the number of samples to draw.",
+                        default=1)
+    parser.add_argument("--n_max", type=int, help="The maximum number of samples to draw for each language.",
+                        default=100)
+    parser.add_argument("-w", "--wcs_path", type=str, help="Path to the directory containing World Color Survey data.",
+                        default="wcs")
+    parser.add_argument("-l", "--language", type=str, help="Specify name of language to only generate samples for.")
+    parser.add_argument("-o", "--output", type=str, help="Output path", default="")
+    args = parser.parse_args()
 
-        # plot_gaussians(elicitations, ms)
-        # plt.show()
+    print("Running learnability problem")
 
-        pC_H = pWC_H.sum(axis=0)
-        pW_CH = pWC_H / pC_H
+    print(f"Loading WCS survey data from \"{args.wcs_path}\" - ", end="")
+    wcs_path = args.wcs_path
+    color_data_integer = pd.read_csv(os.path.join(wcs_path, "term.txt"),
+                                     sep="\t", names=["language", "speaker", "chip", "word"])
+    lang_id_lang = pd.read_csv(os.path.join(wcs_path, "lang.txt"),
+                               sep="\t", usecols=[0, 1], index_col=0, names=["id", "language"])
+    chip_data = pd.read_csv(os.path.join(wcs_path, "chip.txt"),
+                            sep="\t", index_col=0, names=["row", "col", "pos"])
+    chip2lab = pd.read_csv(os.path.join(wcs_path, "cnum-vhcm-lab-new.txt"),
+                           sep="\t", header=0, index_col="#cnum")
 
-        pH = 1 / n
+    chip2lab = chip2lab.sort_values(by="#cnum")[["L*", "a*", "b*"]]
+    color_data_integer = color_data_integer.merge(chip2lab, left_on="chip", right_on="#cnum", how="left")
+    covariance_prior = color_data_integer[["L*", "a*", "b*"]].cov().to_numpy()
+    print("done")
 
-        ### COMPUTE p(c) IF DOESNT EXIST ###
+    C = chip2lab.shape[0]  # Number of colour chips
+    N_min = args.n_min  # Number of samples to draw
+    N_step = args.n_step  # Number of samples to draw
+    N_max = args.n_max  # Number of samples to draw
+
+    print("Trying to load colour prior p(C) - ", end="")
+    pC = None
+    if os.path.exists("pC.p"):
+        pC = pickle.load(open("pC.p", "rb"))
+        print("done")
+    else:
+        print("failed")
+        print("Prior will be calculated during runtime.")
+
+    print("Calculating p(W, C) for languages")
+    models = []  # Array to store fitted model params
+    progress = tqdm(color_data_integer.groupby('language'))
+    for i, (lang_id, elicitations) in enumerate(progress):
+        nd = elicitations.shape[0]  # Number of datapoints for this language
+        nw = elicitations["word"].nunique()  # Number of unique colour terms
+        lang_str = lang_id_lang.loc[lang_id]["language"]  # human-readable name for the language
+
+        progress.set_postfix({"lang": lang_str, "nd": nd, "nw": nw})
+
+        # Calculate joint distribution p(W,C|H)
+        pWC_H, _ = learn_language(elicitations)
+
+        # Compute prior for language p_l(C) if it doesn't exist
         plC = None
         if pC is None:
+            pC_H = pWC_H.sum(axis=0)
+            pW_CH = pWC_H / pC_H
+
             _, q_wct = ck_blahut_arimoto_ib(pWC_H, 1, pW_CH, "kl-divergence")
+
             plC = q_wct.sum(axis=0).sum(axis=1)
             plC /= plC.sum()
 
-        models.append((
-            (language, lang_str),
-            (n, nd, nw),
-            plC,
-            pH,
-            pWC_H,
-            ms
-        ))
+        # Sample N points from the joint distribution
+        samples = []
+        flat_joint = pWC_H.flatten()
+        for N in np.arange(N_min, N_max, N_step):
+            sample_idx = np.random.choice(np.arange(nw * C), (N,), True, flat_joint)
+            samples.append(sample_idx)
 
-### COMPUTE COLOUR PRIOR p(c) ###
-if pC is None:
-    pC = np.zeros((C, ))
-    L = 0
-    for model in models:
-        _, language = model[0]
-        if language in ["Amuzgo", "Camsa", "Candoshi", "Chayahuita", "Chiquitano", "Eastern Cree", "Carib",
-                        "Ifugao", "Micmac", "Nahuatl", "Papago", "Slave", "Tacana", "Central Tarahumara",
-                        "W. Tarahumara"]:
-            continue
-        plC = model[2]
-        pC += plC
-        L += 1
-    pC /= L
-    pickle.dump(pC, open("pC.p", "wb"))
-    chip_data["row"] = chip_data["row"].apply(lambda x: ord(x) - 65)
-    grid = np.zeros((8, 40))
-    for i, row, col, pos in chip_data.itertuples():
-        if col == 0: continue
-        grid[row - 1, col - 1] = pC[i - 1]
+        model = Model(lang_id, lang_str, nd, nw, pWC_H, plC)
+        models.append((model, samples))
 
-    plt.imshow(np.flip(grid))
+        # FOR TESTING; TODO: REMOVE LATER
+        if i == 0: break
+
+    # Compute colour prior p(C) if it doesn't exist
+    if pC is None:
+        print("Calculating prior - ", end="")
+        pC = np.zeros((C,))
+        L = 0
+        for model, _ in models:
+            if model.lang_id in ["Amuzgo", "Camsa", "Candoshi", "Chayahuita", "Chiquitano", "Eastern Cree", "Carib",
+                                 "Ifugao", "Micmac", "Nahuatl", "Papago", "Slave", "Tacana", "Central Tarahumara",
+                                 "W. Tarahumara"]:
+                continue
+            pC += model.plc
+            L += 1
+        pC /= L
+        pickle.dump(pC, open("pC.p", "wb"))
+        print("done")
+
+        chip_data["row"] = chip_data["row"].apply(lambda x: ord(x) - 65)
+        grid = np.zeros((8, 40))
+        for i, row, col, pos in chip_data.itertuples():
+            if col == 0: continue
+            grid[row - 1, col - 1] = pC[i - 1]
+        plt.imshow(np.flip(grid))
+        plt.show()
+
+    for model, samples in models:
+        inf_loss = []
+        complexity = []
+        pWC_H = model.pwc_h
+        pWC_H_flat = pWC_H.flatten()
+        for sample in samples:
+            # Simplicity prior
+            terms = np.sort(np.unique(sample % model.n_words))  # Colour terms appearing in the sample
+            n_unique = len(terms)
+            pH = expon.pdf(len(sample), scale=pWC_H.shape[0])
+
+            # Compute information loss (log likelihood)
+            ll = np.log(pWC_H_flat[sample]) + np.log(pH)
+            ll[ll == -np.inf] = 0.0
+            inf_loss.append(ll.sum())
+
+            # Compute complexity (mutual information)
+            pC_H = pWC_H[terms, :].sum(axis=0)
+            pC_H /= pC_H.sum()
+            lratio = np.log(pC_H) - np.log(pC)
+            lratio[lratio == -np.inf] = 0
+            complexity.append(np.sum(pC_H * pH * lratio))
+
+        plt.plot(complexity, inf_loss, '.')
+    plt.xlabel("Mutual information")
+    plt.ylabel("Log likelihood")
     plt.show()
-
-
-for model in models:
-    _, (n, _, _), plC, pH, pWC_H, _ = model
-
-    ### COMPUTE INFORMATION LOSS (log likelihood) ###
-
-    ll = np.log(pWC_H * pH)
-    ll[ll == -np.inf] = 0.0
-    inf_loss.append(-ll.sum() / n)
-
-    ### COMPUTE COMPLEXITY (mutual information) ###
-    pC_H = pWC_H.sum(axis=0)
-    lratio = np.log(pC_H) - np.log(pC)
-    lratio[lratio == -np.inf] = 0
-
-    complexity.append(np.sum(pC_H * pH * lratio))
-
-plt.plot(complexity, inf_loss, '.')
-plt.xlabel("Complexity")
-plt.ylabel("Information Loss")
-plt.show()
