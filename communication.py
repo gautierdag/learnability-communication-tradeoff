@@ -1,5 +1,6 @@
 from typing import Tuple
 from typing import Tuple, List
+import pandas as pd
 import numpy as np
 from numpy.typing import ArrayLike
 from itertools import product
@@ -50,6 +51,42 @@ class LanguageSampler(object):
             for word, colour in zip(words, colours):
                 print(str(lan_idx)+'\t'+str(spk_idx)+'\t'+str(colour)+\
                     '\t'+word, file=f)
+                
+class MutualInfoCalculator(object):
+    def __init__(self) -> None:
+        super().__init__()
+    
+    @staticmethod
+    def read_language_data(fpath:str="wcs/term.txt") -> pd.DataFrame:
+        df = pd.read_csv(fpath, delimiter="\t", header=None)
+        df.columns = ["language", "speaker", "chip", "word"]
+        return df
+    
+    @staticmethod
+    def read_colour_data(fpath:str="wcs/cnum-vhcm-lab-new.txt") -> pd.DataFrame:
+        df = pd.read_csv(fpath, sep="\t", header=0, index_col="#cnum")
+        df = df.sort_values(by="#cnum")[["L*", "a*", "b*"]].copy().reset_index()
+        return df
+    
+    @staticmethod
+    def get_px(fpath:str="wcs/term.txt") -> ArrayLike:
+        raise NotImplementedError
+    
+    @staticmethod
+    def get_pxGy(fpath:str="wcs/cnum-vhcm-lab-new.txt") -> ArrayLike:
+        raise NotImplementedError
+    
+    def get_MI(self, flan:str=None, fclab:str=None) -> float:
+        p_x = self.get_px(flan)
+        p_xGy = self.get_pxGy(fclab)
+        
+        p_xy = p_xGy * p_x[:, np.newaxis]
+        p_xy = p_xy / np.sum(p_xy)
+        
+        mi = np.nansum(p_xy * np.log2(p_xy / (p_xy.sum(axis=0, keepdims=True) *\
+                        p_xy.sum(axis=1, keepdims=True))))
+        
+        return mi
 
 if __name__ == '__main__':
     sampler = LanguageSampler('./tmp_test.npy')
