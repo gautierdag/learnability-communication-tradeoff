@@ -1,6 +1,6 @@
 .DS_Store
 .vscode
-ib-color-naming-noga/models/
+noga/models/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
