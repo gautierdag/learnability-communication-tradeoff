@@ -40,7 +40,8 @@ class GaussianLanguageModel:
     # Excluded language IDs for color prior calculation, as given by Noga.
     COLOR_PRIOR_EXCLUDED = [7, 19, 20, 25, 27, 31, 38, 48, 70, 80, 88, 91, 92, 93]
 
-    def __init__(self, term_file: str = "wcs/term.txt", wcs_path: str = "wcs", cov_reg: float = 1.e-5):
+    def __init__(self, term_file: str = "wcs/term.txt", wcs_path: str = "wcs",
+                 cov_reg: float = 1.e-5, cov_prior: np.ndarray = None):
         """ Initialise a new model class. Language models are stored in the dictionary self.models which is indexed by
         the ID of the language.
 
@@ -48,9 +49,11 @@ class GaussianLanguageModel:
             term_file: The file containing the color term elicitations
             wcs_path: Path to the directory containing the WCS data
             cov_reg: Covariance regularisation hyper-parameter
+            cov_prior: Pre-calculated covariance matrix, used if calculated covariance matrix is degenerate
         """
         self.wcs_path = wcs_path
         self.cov_reg = cov_reg
+        self.cov_prior = cov_prior
         self.models = {}
         self.models_params = {}
 
@@ -83,6 +86,13 @@ class GaussianLanguageModel:
         pc /= L
         return pc
 
+    def calculate_cov_prior(self) -> np.ndarray:
+        """ Calculate covariance prior averaged over all languages and color terms. """
+        prior = np.zeros((3, 3))
+        for model in self.models_params.values():
+            prior += sum([params[1] for params in model.values()]) / len(model)
+        return prior / len(self.models_params)
+
     def learn_languages(self, language_ids: List[int] = None, progress_bar: bool = True) -> None:
         """ Fit a Gaussian model to each language to calculate the joint distribution P(W, C). Fitted models are stored
         in the field self.models
@@ -114,7 +124,10 @@ class GaussianLanguageModel:
 
                 mu, cov = subset.mean().to_numpy(), subset.cov().to_numpy()
                 if subset.shape[0] == 1:
-                    cov = np.identity(3)
+                    if self.cov_prior is not None:
+                        cov = self.cov_prior
+                    else:
+                        cov = np.identity(3)
                 cov += np.identity(3) * self.cov_reg
                 proba = multivariate_normal(mu, cov).pdf(self.chip_to_lab)
 
@@ -157,7 +170,7 @@ class GaussianLanguageModel:
 
     @staticmethod
     def score_languages(adult: "GaussianLanguageModel", child: "GaussianLanguageModel", pc: np.array = None) \
-            -> Dict[int, Tuple[float, float]]:
+            -> Dict[int, np.ndarray]:
         """ For each real-world language score a hypothetical child language learnt on restricted number of sampled data
         against an adult language learnt on complete data.
 
@@ -170,7 +183,7 @@ class GaussianLanguageModel:
             A dictionary of tuples in the form (mutual information, log-likelihood) for each language id.
         """
         if pc is None:
-            pc = np.full((330, ), 1 / 330)
+            pc = np.full((330,), 1 / 330)
 
         scores = {}
         # samples = child.term_data.groupby("language")
@@ -181,31 +194,20 @@ class GaussianLanguageModel:
             # Simplicity prior
             n = child.sample_size[lang_id]
             nw = len(child.models_params[lang_id])
-            ph = 1 # expon.pdf(nw, scale=10)
-
-            # word2idx = {w: i for (i, w) in enumerate(child.models_params[lang_id])}
-            # sample = samples.get_group(lang_id)
-            # sample = np.vstack([
-            #     sample["word"].apply(lambda x: word2idx[x]),
-            #     sample["chip"] - 1
-            # ]).T
-            # ll = np.log(np.take(pwc_h, sample)) + np.log(ph)
-            # ll[ll == -np.inf] = 0.0
-            # inf_loss = ll.sum()
+            ph = 1 / np.sqrt(n)  # expon.pdf(nw, scale=10)
 
             pwc_h_ = np.zeros_like(pwc)
             shared_idx = [i for i, w in enumerate(adult.models_params[lang_id])
-                           if w in child.models_params[lang_id]]
+                          if w in child.models_params[lang_id]]
             pwc_h_[shared_idx, :] = pwc_h
             inf_loss = DKL(pwc, pwc_h_)
 
             # Compute complexity (mutual information)
             pc_h = pwc_h.sum(axis=0)
-            lratio = np.log(pc_h) - np.log(pwc.sum(axis=0))
-            lratio[lratio == -np.inf] = 0
-            mutual_info = np.sum(pc_h * ph * lratio)
+            pc = pwc.sum(axis=0)
+            mutual_info_h = np.nansum(pc_h * ph * (np.log(pc_h) - np.log(pc)))
 
-            scores[lang_id] = np.array([mutual_info, inf_loss])
+            scores[lang_id] = np.array([mutual_info_h, inf_loss])
         return scores
 
 
@@ -215,6 +217,8 @@ if __name__ == '__main__':
 
     adult_model = GaussianLanguageModel()
     adult_model.learn_languages()
+
+    adult_cov_prior = adult_model.calculate_cov_prior()
 
     # Calculate color prior once
     if not os.path.exists("pc.p"):
@@ -226,14 +230,14 @@ if __name__ == '__main__':
 
     # Run scoring function on various language samples
     scores = []
-    n_range = np.arange(2, 100, 1)
+    n_range = np.arange(1, 101, 1)
     lid = 1  # The language to examine
     for n in tqdm(n_range):
         sample = adult_model.sample_languages(n)
         GaussianLanguageModel.write_samples_file(sample)
 
         child_model = GaussianLanguageModel("sampled_term.txt")
-        child_model.learn_languages(language_ids=[1], progress_bar=False)
+        child_model.learn_languages(language_ids=[lid], progress_bar=False)
         s = GaussianLanguageModel.score_languages(adult_model, child_model, None)[lid]
         scores.append(s)
     scores = np.array(scores)
