@@ -126,7 +126,7 @@ class MutualInfoCalculator(object):
         p_xs = []
         for language in df.language.unique():
             # convert words to indices
-            words = p_chip_word_language[1].reset_index().word.unique()
+            words = p_chip_word_language[language].reset_index().word.unique()
             word_to_index = {word: i for word, i in zip(words, range(len(words)))}
             # index_to_word =  {i: word for word, i in zip(words, range(len(words))) }
 
@@ -187,7 +187,7 @@ class MutualInfoCalculator(object):
 
         return p_xGy
 
-    def get_MI(self, flan: str = None, fclab: str = None) -> float:
+    def get_MI(self, flan: str = "wcs/term.txt", fclab: str = "wcs/cnum-vhcm-lab-new.txt") -> float:
         p_x = self.get_px(flan)
         p_xGy = self.get_pxGy(fclab)
 

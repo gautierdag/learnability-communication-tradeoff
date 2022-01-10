@@ -1,6 +1,6 @@
 import pickle
 import os
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union
 
 import pandas as pd
 import numpy as np
@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from scipy.stats import expon, beta, multivariate_normal
 from ck_blahut_arimoto import ck_blahut_arimoto_ib
-from noga.figures import grid2img
+from noga.figures import grid2img, mode_map
 from noga.tools import DKL, MI
 from tqdm import tqdm
 
@@ -40,13 +40,13 @@ class GaussianLanguageModel:
     # Excluded language IDs for color prior calculation, as given by Noga.
     COLOR_PRIOR_EXCLUDED = [7, 19, 20, 25, 27, 31, 38, 48, 70, 80, 88, 91, 92, 93]
 
-    def __init__(self, term_file: str = "wcs/term.txt", wcs_path: str = "wcs",
+    def __init__(self, term_file: Union[str, pd.DataFrame] = "wcs/term.txt", wcs_path: str = "wcs",
                  cov_reg: float = 1.e-5, cov_prior: np.ndarray = None):
         """ Initialise a new model class. Language models are stored in the dictionary self.models which is indexed by
         the ID of the language.
 
         Args:
-            term_file: The file containing the color term elicitations
+            term_file: The file containing the color term elicitations or a DataFrame with already read data
             wcs_path: Path to the directory containing the WCS data
             cov_reg: Covariance regularisation hyper-parameter
             cov_prior: Pre-calculated covariance matrix, used if calculated covariance matrix is degenerate
@@ -57,14 +57,30 @@ class GaussianLanguageModel:
         self.models = {}
         self.models_params = {}
 
-        self.term_data = pd.read_csv(term_file, sep="\t", names=["language", "speaker", "chip", "word"])
         self.chip_data = pd.read_csv(os.path.join(wcs_path, "chip.txt"), sep="\t", index_col=0,
                                      names=["row", "col", "pos"])
         self.chip_to_lab = pd.read_csv(os.path.join(wcs_path, "cnum-vhcm-lab-new.txt"), sep="\t", header=0,
                                        index_col="#cnum")
+        self.chip_to_lab = self.chip_to_lab.sort_values(by="#cnum")[["L*", "a*", "b*"]]
+
+        self.sample_size = None
+        self.term_data = None
+        self.load_term_data(term_file)
+
+    def load_term_data(self, term_file: Union[str, pd.DataFrame]):
+        """ Load new color term data to the model, overwriting the current data.
+
+        Args:
+            term_file: Either a string giving the path to the term data or a DataFrame containing already read data
+        """
+        if isinstance(term_file, str):
+            self.term_data = pd.read_csv(term_file, sep="\t", names=["language", "speaker", "chip", "word"])
+        elif isinstance(term_file, pd.DataFrame):
+            self.term_data = term_file
+        else:
+            return
 
         self.sample_size = dict(self.term_data.groupby("language").size())
-        self.chip_to_lab = self.chip_to_lab.sort_values(by="#cnum")[["L*", "a*", "b*"]]
         self.term_data = self.term_data.merge(self.chip_to_lab, left_on="chip", right_on="#cnum", how="left")
 
     def calculate_color_prior(self) -> np.array:
@@ -169,7 +185,7 @@ class GaussianLanguageModel:
         samples.to_csv(output_file, sep="\t", index=False, header=False)
 
     @staticmethod
-    def score_languages(adult: "GaussianLanguageModel", child: "GaussianLanguageModel", pc: np.array = None) \
+    def score_languages(adult: "GaussianLanguageModel", child: "GaussianLanguageModel") \
             -> Dict[int, np.ndarray]:
         """ For each real-world language score a hypothetical child language learnt on restricted number of sampled data
         against an adult language learnt on complete data.
@@ -177,14 +193,10 @@ class GaussianLanguageModel:
         Args:
              adult: The adult model learnt on complete data
              child: The child model learnt on sampled, partial data
-             pc: The color prior
 
         Returns:
             A dictionary of tuples in the form (mutual information, log-likelihood) for each language id.
         """
-        if pc is None:
-            pc = np.full((330,), 1 / 330)
-
         scores = {}
         # samples = child.term_data.groupby("language")
         for lang_id in child.models:
@@ -220,26 +232,22 @@ if __name__ == '__main__':
 
     adult_cov_prior = adult_model.calculate_cov_prior()
 
-    # Calculate color prior once
-    if not os.path.exists("pc.p"):
-        pc = adult_model.calculate_color_prior()
-        plot_color_prior(pc)
-        pickle.dump(pc, open("pc.p", "wb"))
-    else:
-        pc = pickle.load(open("pc.p", "rb"))
-
     # Run scoring function on various language samples
     scores = []
     n_range = np.arange(1, 101, 1)
     lid = 1  # The language to examine
+    child_model = GaussianLanguageModel(cov_prior=adult_cov_prior)
     for n in tqdm(n_range):
         sample = adult_model.sample_languages(n)
-        GaussianLanguageModel.write_samples_file(sample)
-
-        child_model = GaussianLanguageModel("sampled_term.txt")
+        # GaussianLanguageModel.write_samples_file(sample)
+        # child_model = GaussianLanguageModel("sampled_term.txt")
+        child_model.load_term_data(sample)
         child_model.learn_languages(language_ids=[lid], progress_bar=False)
-        s = GaussianLanguageModel.score_languages(adult_model, child_model, None)[lid]
-        scores.append(s)
+        s = GaussianLanguageModel.score_languages(adult_model, child_model)[lid]
+
+        mode_map(child_model.models[lid].T.to_numpy(),
+                 adult_model.models[lid].sum(axis=0)[:, None])
+        plt.show()
     scores = np.array(scores)
 
     # plt.rcParams.update({"text.usetex": True})
