@@ -1,3 +1,5 @@
+import pickle
+
 import imageio
 import os
 from typing import List, Dict, Tuple, Union
@@ -185,7 +187,7 @@ class GaussianLanguageModel:
         samples.to_csv(output_file, sep="\t", index=False, header=False)
 
     @staticmethod
-    def score_languages(adult: "GaussianLanguageModel", child: "GaussianLanguageModel") \
+    def score_languages(adult: "GaussianLanguageModel", child: "GaussianLanguageModel", color_prior: np.array = None) \
             -> Dict[int, np.ndarray]:
         """ For each real-world language score a hypothetical child language learnt on restricted number of sampled data
         against an adult language learnt on complete data.
@@ -193,6 +195,7 @@ class GaussianLanguageModel:
         Args:
              adult: The adult model learnt on complete data
              child: The child model learnt on sampled, partial data
+             color_prior: The color prior
 
         Returns:
             A dictionary of tuples in the form (mutual information, log-likelihood) for each language id.
@@ -206,7 +209,7 @@ class GaussianLanguageModel:
             # Simplicity prior
             n = child.sample_size[lang_id]
             nw = len(child.models_params[lang_id])
-            ph = expon.pdf(nw, scale=10)
+            ph = 1 / np.sqrt(nw)
 
             pwc_h_ = np.zeros_like(pwc)
             shared_idx = [i for i, w in enumerate(adult.models_params[lang_id])
@@ -216,7 +219,7 @@ class GaussianLanguageModel:
 
             # Compute complexity (mutual information)
             pc_h = pwc_h.sum(axis=0)
-            pc = pwc.sum(axis=0)
+            pc = pwc.sum(axis=0) if color_prior is None else color_prior
             mutual_info_h = np.nansum(pc_h * ph * (np.log(pc_h) - np.log(pc)))
 
             scores[lang_id] = np.array([mutual_info_h, inf_loss])
@@ -231,6 +234,14 @@ if __name__ == '__main__':
     adult_model.learn_languages()
     adult_cov_prior = adult_model.calculate_cov_prior()
 
+    # Calculate color prior once
+    if not os.path.exists("pc.p"):
+        pc = adult_model.calculate_color_prior()
+        plot_color_prior(pc)
+        pickle.dump(pc, open("pc.p", "wb"))
+    else:
+        pc = pickle.load(open("pc.p", "rb"))
+
     # Run scoring function on various language samples
     scores = []
     n_range = np.arange(1, 101, 1)
@@ -239,7 +250,7 @@ if __name__ == '__main__':
     child_model = GaussianLanguageModel(cov_prior=adult_cov_prior)
     samples = pd.DataFrame()
 
-    plot_color_map = True
+    plot_color_map = False
     color_maps = []
 
     for i in tqdm(n_range):
@@ -250,7 +261,7 @@ if __name__ == '__main__':
         # child_model = GaussianLanguageModel("sampled_term.txt")
         child_model.load_term_data(samples)
         child_model.learn_languages(language_ids=[lid], progress_bar=False)
-        s = GaussianLanguageModel.score_languages(adult_model, child_model)[lid]
+        s = GaussianLanguageModel.score_languages(adult_model, child_model, pc)[lid]
         scores.append(s)
 
         if plot_color_map:
