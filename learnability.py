@@ -1,4 +1,4 @@
-import pickle
+import imageio
 import os
 from typing import List, Dict, Tuple, Union
 
@@ -229,16 +229,20 @@ if __name__ == '__main__':
 
     adult_model = GaussianLanguageModel()
     adult_model.learn_languages()
-
     adult_cov_prior = adult_model.calculate_cov_prior()
 
     # Run scoring function on various language samples
     scores = []
     n_range = np.arange(1, 101, 1)
     lid = 47  # The language to examine
+
     child_model = GaussianLanguageModel(cov_prior=adult_cov_prior)
     samples = pd.DataFrame()
-    for _ in tqdm(n_range):
+
+    plot_color_map = True
+    color_maps = []
+
+    for i in tqdm(n_range):
         sample = adult_model.sample_languages(1)
         samples = pd.concat([samples, sample], axis=0)
         samples = samples.sort_values("language")
@@ -249,12 +253,21 @@ if __name__ == '__main__':
         s = GaussianLanguageModel.score_languages(adult_model, child_model)[lid]
         scores.append(s)
 
-        # mode_map(child_model.models[lid].T.to_numpy(),
-        #          adult_model.models[lid].sum(axis=0)[:, None])
-        # plt.show()
+        if plot_color_map:
+            mode_map(child_model.models[lid].T.to_numpy(),
+                     adult_model.models[lid].sum(axis=0)[:, None])
+            fig = plt.gcf()
+            fig.canvas.draw()
+            image_from_plot = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            figure_size = tuple(np.array(fig.get_size_inches()[::-1] * fig.dpi, dtype=int)) + (3,)
+            image_from_plot = image_from_plot.reshape(figure_size)
+            color_maps.append(image_from_plot)
     scores = np.array(scores)
 
-    # plt.rcParams.update({"text.usetex": True})
+    if plot_color_map:
+        with imageio.get_writer(f"lang_{lid}.gif", mode='I') as writer:
+            for img in color_maps:
+                writer.append_data(img)
 
     plt.scatter(scores[:, 0], scores[:, 1], c=n_range, cmap="gray_r")
     for i, coord in enumerate(scores):
