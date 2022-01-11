@@ -89,7 +89,7 @@ def plot_curves(csv_path:str, out_file:str) -> None:
         lan_df = df[df['language id'] == lan_id]
         # select a colour for the language
         colour = list(matplotlib.colors.cnames.keys())[lan_id]
-        df.plot(x="rate", y="distortion")
+        lan_df.plot(x="rate", y="distortion")
     
     plt.savefig(out_file, format='pdf', bbox_inches='tight')
 
