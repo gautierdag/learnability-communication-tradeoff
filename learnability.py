@@ -206,7 +206,7 @@ class GaussianLanguageModel:
             # Simplicity prior
             n = child.sample_size[lang_id]
             nw = len(child.models_params[lang_id])
-            ph = 1 / np.sqrt(n)  # expon.pdf(nw, scale=10)
+            ph = expon.pdf(nw, scale=10)
 
             pwc_h_ = np.zeros_like(pwc)
             shared_idx = [i for i, w in enumerate(adult.models_params[lang_id])
@@ -235,19 +235,23 @@ if __name__ == '__main__':
     # Run scoring function on various language samples
     scores = []
     n_range = np.arange(1, 101, 1)
-    lid = 1  # The language to examine
+    lid = 47  # The language to examine
     child_model = GaussianLanguageModel(cov_prior=adult_cov_prior)
-    for n in tqdm(n_range):
-        sample = adult_model.sample_languages(n)
+    samples = pd.DataFrame()
+    for _ in tqdm(n_range):
+        sample = adult_model.sample_languages(1)
+        samples = pd.concat([samples, sample], axis=0)
+        samples = samples.sort_values("language")
         # GaussianLanguageModel.write_samples_file(sample)
         # child_model = GaussianLanguageModel("sampled_term.txt")
-        child_model.load_term_data(sample)
+        child_model.load_term_data(samples)
         child_model.learn_languages(language_ids=[lid], progress_bar=False)
         s = GaussianLanguageModel.score_languages(adult_model, child_model)[lid]
+        scores.append(s)
 
-        mode_map(child_model.models[lid].T.to_numpy(),
-                 adult_model.models[lid].sum(axis=0)[:, None])
-        plt.show()
+        # mode_map(child_model.models[lid].T.to_numpy(),
+        #          adult_model.models[lid].sum(axis=0)[:, None])
+        # plt.show()
     scores = np.array(scores)
 
     # plt.rcParams.update({"text.usetex": True})
