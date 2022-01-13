@@ -64,6 +64,7 @@ class GaussianLanguageModel:
         self.cov_reg = cov_reg
         self.cov_prior = cov_prior
         self.models = {}
+        self.models_unnormed = {}
         self.models_params = {}
 
         self.chip_data = pd.read_csv(
@@ -177,6 +178,9 @@ class GaussianLanguageModel:
             pc_w = np.array(pc_w)
             pwc = pc_w / pc_w.sum()
 
+            self.models_unnormed[lang_id] = pd.DataFrame(
+                pc_w, index=model_params.keys()
+            )
             self.models[lang_id] = pd.DataFrame(pwc, index=model_params.keys())
             self.models_params[lang_id] = model_params
 
@@ -307,7 +311,7 @@ if __name__ == "__main__":
             s = GaussianLanguageModel.score_languages(adult_model, child_model, pc)[lid]
             scores[lid].append(s)
             with open(f"output/learnability/{seed}/{lid}/{i}.npy", "wb") as f:
-                np.save(f, child_model.models[lid])
+                np.save(f, child_model.models_unnormed[lid])
 
         if plot_color_map:
             mode_map(
