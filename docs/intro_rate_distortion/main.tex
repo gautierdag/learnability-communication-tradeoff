@@ -14,6 +14,7 @@
 \usepackage{cancel}
 \usepackage[switch]{lineno}
 \usepackage[bottom]{footmisc}
+\usepackage[ruled,vlined]{algorithm2e}
 
 \definecolor{orange}{rgb}{0.93, 0.53, 0.18}
 
@@ -147,13 +148,13 @@ The variables involved in this project are listed as follows:
     \begin{equation}
         p(\hat{m}|w) =
         \begin{cases}
-            1 & \text{if $\hat{m}=w$\footnote{Rigorously speaking, $\hat{m}$ can't equal to $w$, but it is easier to write in this way.}}\\
+            1 & \text{if $\hat{m}=w$}\\
             0 & \text{otherwise}
         \end{cases} 
         \label{eq:bijective_mhat_w}
     \end{equation}
     
-    Therefore, the equivalence below holds:
+    Rigorously speaking, $\hat{m}$ can't equal to $w$, but it is easier to write it this way. Therefore, the equivalence below holds:
     \begin{equation}
         p(c|w)  = \sum_{\hat{m}} p(c|\hat{m})p(\hat{m}|w)  = p(c|\hat{m})
         \label{eq:p_mhat_and_m}
@@ -338,6 +339,7 @@ But, mathematically, $H$ has the same type and domain to $M$.
 The overall objective in the learning part of our project is to plot a trade-off curve like the one shown in Figure~\ref{fig:curve_comm}, but with axes measured by different quantities.
 In learning problem, the \textcolor{red}{complexity} is measured by \textcolor{red}{$I(H;C)$}, and the \textcolor{blue}{information loss} is measured by the \textcolor{blue}{negative log-likelihood} of data samples. 
 
+
 \subsection{Optimisation Objective}
 \label{ssec:learn_optim}
 
@@ -404,15 +406,57 @@ To be more specific, if $N$ is very small, then the log-likelihood would dominat
 \subsection{Complexity of Hypotheses}
 \label{ssec:learn_complexity}
 
-After solving the estimation problem illustrated in Section~\ref{ssec:learn_optim}, for each $h\in\mathcal{H}$, we will a corresponding mode $\rc(h)$, and a corresponding variance $\Sigma(h)$. 
+After solving the estimation problem illustrated in Section~\ref{ssec:learn_optim}, for each $h\in\mathcal{H}$, we will have a corresponding mode $\rc(h)$, and variance $\Sigma(h)$. 
 At the same time, we will also have a mixing coefficient $\pi_n$ for every $c_n$ in the dataset.
 Therefore, we can easily calculate the mutual information between $H$ and $C$ as follow:
 \begin{equation}
     I(H;C) = \sum_{h,c} p(c|h)p(h)\log\frac{p(c|h)}{p(c)}
 \end{equation}
 
-Regarding the prior on hypotheses $p(h)$, we can assume an Minimum Description Length prior.
-\textcolor{orange}{@Coleman: can you provide more details about MDL prior?}
+% Regarding the prior on hypotheses $p(h)$, we can assume an Minimum Description Length prior.
+% \textcolor{orange}{@Coleman: can you provide more details about MDL prior?}
+
+We sample $p(H) \sim DP(B, \alpha)$, a Dirichlet-process with given base distribution $B$ and scaling parameter $\alpha$. For Gaussian mixture model $B$ is defined as $\mathcal{N}(\Bar{X},1)$, where $\Bar{X}$ is the mean of the input data (see \ref{ssec:color_dataset}). The scaling parameter $\alpha$ is set to \textit{what?}. Reference for using DP?
+
+For the prior colour-chip distribution we use the least informative prior as defined by \cite{zaslavsky2018efficient}. A single prior distribution is calculated for all languages following the formulation:
+
+\[p(c)=\argmax_{p(c)} H(C)-H_q(C|W)\]
+
+That is, we aim to maximise the uncertainty about our prior colour distribution while minimising the expected uncertainty of $c$ given $w$. Here $H_q(C|W)=-\sum_{c,w} p(c)p(w|c)\log \frac{p(c|w)}{p(c)}$ is the conditional entropy. This formulation is equivalent to mixising the mutual information $I_q(W;C)$ and can be evaluated using the Blahut-Arimoto algorithm. We call this prior the least informative prior because it maximises the expected KL-divergence between prior and posterior:
+
+\begin{align*}
+    % \begin{split}
+        & I_q(W;C)\\
+        &  = \sum_{w,c} p(w)p(c|w)\log \frac{p(c|w)}{p(c)} \\
+        &  = \sum_{w} p(w) \sum_c p(c|w)\log \frac{p(c|w)}{p(c)} \\
+        &  = \sum_{w} p(w) D[p(c|w)||p(c)] \\
+        & = \mathbb{E}_{W}[D[p(c|w)||p(c)]
+    % \end{split}
+    \label{eq:least_informative_prior}
+\end{align*}
+
+simulate actual kid learning
+use schedule m
+calculate likelihood over all the color chips and average, multiply by N to get number of data points
+that is beta for tradeoff
+
+p(H) dirichlet process prior -- favor as few lumps (gaussians) as possible
+penalize the gaussian prior on how close the means and std dev
+8 terms in english, 8 gaussians, reward gaussians that are basically the same thing
+reward gaussian with similar means
+reward wider std deviation
+
+
+ideally variational/dirichlet
+
+generate hypotheses with a schedule, each hypotheses get n data points on the schedule
+oversample lower end
+
+information loss not on training data but on WCS data (uniform)
+
+multiply the plot (information loss) by N the number of data points for the hypothesis (dont)
+
+or just plot at N=1 :D
 
 \subsection{Information Loss of Hypotheses}
 \label{ssec:learn_info_loss}
@@ -436,15 +480,81 @@ Fortunately, we would have this quantity once we solve the estimation problem in
 \section{Experiment}
 \label{sec:experiment}
 
-\subsection{Colour Naming Dataset}
+\subsection{The World Colour Survey Dataset}
 \label{ssec:color_dataset}
+
+\begin{table}[h]
+\begin{tabular}{lllll}
+Language & Speaker & Chip Number & Word &  \\
+1        & 1       & 2    & LB   &  \\
+1        & 1       & 3    & LE   &  \\
+1        & 1       & 4    & WK   &  \\
+1        & 1       & 5    & LF   &  \\
+1        & 1       & 6    & LE   & 
+\end{tabular}
+\caption{World Colour Survey sample}
+\label{table:raw_data}
+\end{table}
+
+The World Colour Survey (WCS) \cite{berlin1991basic} is a global data collection effort that was initiated in the 1970's.
+\citet{merrifield1971} theorised about the universality of colour terms in an early paper in 1969 and the WCS was conducted to substantiate these theories.
+
+The colour space was divided into 330 chips of varying colour and intensity (shown in \ref{fig:colour_palette}). 
+Multiple native speakers of each language were asked to identify the colour of the chip in their language.
+The final dataset includes 110 languages, 2616 speakers, and 2317 unique words.  
+
+An example of the dataset can be seen in Table \ref{table:raw_data}. 
+For each language and respective speakers, each colour chip (indicated by a number from 1 to 330) is annotated by a word. 
+
+\begin{table}[h]
+\begin{tabular}{llll}
+Chip Number & L*    & a*   & b*   \\
+141  & 96.00 & -.06 & .06  \\
+274  & 91.08 & -.05 & .06  \\
+129  & 91.08 & 5.53 & 2.22 \\
+230  & 91.08 & 5.51 & 3.28
+\end{tabular}
+\caption{Predefined mapping from colour chip to the CIELAB perceptual space of colour}
+\label{table:lab_values}
+\end{table}
+
+The WCS also provides us with a mapping between the chip color space and the CIELAB color space (Table \ref{table:lab_values}).
+CIELAB is a colour space designed with the goal of being a perceptually uniform space, where a change in values reflects the same perceived change \cite{CIELAB}.
+A visual representation of CIELAB can be seen in Figure \ref{fig:cielab}.
+We map colour from chips to the CIELAB space using the mapping provided by the WCS to capture the space of colours in a human perceived space.
+
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.3\textwidth]{docs/intro_rate_distortion/graphs/CIELAB_color_space_top_view.png}
+    \caption{The CIELAB color space}
+    \label{fig:cielab}
+\end{figure}
+
 
 \subsection{Overall Pipeline}
 \label{ssec:overall_pipeling}
 
+The procedure of one run for our experiment is illustrated in the following Procedure~\ref{al:exp_procedure}.
 
+\begin{algorithm}[h]
+    % \small
+    \SetAlgoLined
+    \SetAlgorithmName{Procedure}{}
+    \KwIn{Input: $\beta$, $N$} \\
+    1. [Comm] Set an IB objective with $\beta$; \\
+    2. [Comm] Minimise IB objective by optimising $p(w|m)$ and $p(m)$; \\
+    3. [Comm] Record complexity $I(M;W)$ and information loss $-I(W;C)$ \\
+    3. [Comm] Sample a dataset $\mathcal{D}$ consists of $N$ pairs of $\{w,c\}$ following the distribution $\sum_m p(w|m)p(c|m)p(m)$; \\
+    4. [Learn] Fit a Gaussian mixture model on $\mathcal{D}$; \\
+    5. [Learn] Record complexity $I(H;C)$ and information loss $-\sum_n\log p(w_n,c_n|H)$.
+ \caption{Procedure for one run of experiment. ``Comm'' represent a step in communication problem, and ``Learn'' represents a step in learning problem.}
+ \label{al:exp_procedure}
+\end{algorithm}
 
-
+For the values of $\beta$, we can vary it from $1$ to $10$ with step size $0.5$. 
+Regard the values of $N$, we can vary it from $20$ to $400$ with step size $20$.
+Once we have the complexity and information loss values in both problems for a pair of $(\beta, N)$, we can plot one point in the communication curve like shown in Figure~\ref{fig:curve_comm}, and another point in the learning curve.
 
 \bibliographystyle{acl_natbib}
 \bibliography{main}
