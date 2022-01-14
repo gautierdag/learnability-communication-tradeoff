@@ -162,7 +162,7 @@ class MutualInfoCalculator(object):
         return p_x
 
     @staticmethod
-    def get_pxGy(fpath: str = "wcs/cnum-vhcm-lab-new.txt", covariance=100) -> ArrayLike:
+    def get_pxGy(fpath: str = "wcs/cnum-vhcm-lab-new.txt", covariance=64) -> ArrayLike:
         """
         Args:
             fpath: path to the colour data file
@@ -187,7 +187,9 @@ class MutualInfoCalculator(object):
 
         return p_xGy
 
-    def get_MI(self, flan: str = "wcs/term.txt", fclab: str = "wcs/cnum-vhcm-lab-new.txt") -> float:
+    def get_MI(
+        self, flan: str = "wcs/term.txt", fclab: str = "wcs/cnum-vhcm-lab-new.txt"
+    ) -> float:
         p_x = self.get_px(flan)
         p_xGy = self.get_pxGy(fclab)
 
