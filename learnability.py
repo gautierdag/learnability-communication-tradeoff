@@ -244,6 +244,7 @@ class GaussianLanguageModel:
             n = child.sample_size[lang_id]
             nw = len(child.models_params[lang_id])
             ph = 1 / np.sqrt(nw)
+            ph = simplicity_prior(*zip(*child.models_params[lang_id].values()))
 
             pwc_h_ = np.zeros_like(pwc)
             shared_idx = [
@@ -261,6 +262,16 @@ class GaussianLanguageModel:
 
             scores[lang_id] = np.array([mutual_info_h, inf_loss])
         return scores
+
+ def simplicity_prior(mus, covs):
+     tot_bc = 0
+     for i in range(len(mus)-1):
+         for j in range(i+1, len(mus)):
+             comb_cov = (covs[i] + covs[j])/2
+             bd = (1/8)*(mus[i] - mus[j]).T @ np.linalg.inv(comb_cov) @ (mus[i] - mus[j]) + (1/2) * np.log( np.linalg.det(comb_cov) / (np.sqrt(np.linalg.det(covs[i]) + np.linalg.det(covs[j]))) )
+             bc = np.exp(-bd)
+             tot_bc += bc
+     return expon.pdf(len(mus) + tot_bc, scale=10)
 
 
 if __name__ == "__main__":
