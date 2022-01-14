@@ -43,8 +43,12 @@ def simplicity_prior(mus, covs):
     for i in range(len(mus) - 1):
         for j in range(i + 1, len(mus)):
             comb_cov = (covs[i] + covs[j]) / 2
-            bd = (1 / 8) * (mus[i] - mus[j]).T @ np.linalg.inv(comb_cov) @ (mus[i] - mus[j]) + (1 / 2) * np.log(
-                np.linalg.det(comb_cov) / (np.sqrt(np.linalg.det(covs[i]) + np.linalg.det(covs[j]))))
+            bd = (1 / 8) * (mus[i] - mus[j]).T @ np.linalg.inv(comb_cov) @ (
+                mus[i] - mus[j]
+            ) + (1 / 2) * np.log(
+                np.linalg.det(comb_cov)
+                / (np.sqrt(np.linalg.det(covs[i]) + np.linalg.det(covs[j])))
+            )
             bc = np.exp(-bd)
             tot_bc += bc
     return expon.pdf(len(mus) + tot_bc, scale=10)
@@ -57,11 +61,11 @@ class GaussianLanguageModel:
     COLOR_PRIOR_EXCLUDED = [7, 19, 20, 25, 27, 31, 38, 48, 70, 80, 88, 91, 92, 93]
 
     def __init__(
-            self,
-            term_file: Union[str, pd.DataFrame] = "wcs/term.txt",
-            wcs_path: str = "wcs",
-            cov_reg: float = 1.0e-5,
-            cov_prior: np.ndarray = None,
+        self,
+        term_file: Union[str, pd.DataFrame] = "wcs/term.txt",
+        wcs_path: str = "wcs",
+        cov_reg: float = 1.0e-5,
+        cov_prior: np.ndarray = None,
     ):
         """Initialise a new model class. Language models are stored in the dictionary self.models which is indexed by
         the ID of the language.
@@ -146,7 +150,7 @@ class GaussianLanguageModel:
         return prior / len(self.models_params)
 
     def learn_languages(
-            self, language_ids: List[int] = None, progress_bar: bool = True
+        self, language_ids: List[int] = None, progress_bar: bool = True
     ) -> None:
         """Fit a Gaussian model to each language to calculate the joint distribution P(W, C). Fitted models are stored
         in the field self.models
@@ -224,16 +228,16 @@ class GaussianLanguageModel:
 
     @staticmethod
     def write_samples_file(
-            samples: pd.DataFrame, output_file: str = "sampled_term.txt"
+        samples: pd.DataFrame, output_file: str = "sampled_term.txt"
     ) -> None:
         """Write a language sample to file in the wcs/term.txt format."""
         samples.to_csv(output_file, sep="\t", index=False, header=False)
 
     @staticmethod
     def score_languages(
-            adult: "GaussianLanguageModel",
-            child: "GaussianLanguageModel",
-            color_prior: np.array = None,
+        adult: "GaussianLanguageModel",
+        child: "GaussianLanguageModel",
+        color_prior: np.array = None,
     ) -> Dict[int, np.ndarray]:
         """For each real-world language score a hypothetical child language learnt on restricted number of sampled data
         against an adult language learnt on complete data.
@@ -261,7 +265,9 @@ class GaussianLanguageModel:
             inf_loss = DKL(pwc, pwc_h_)
 
             # Compute complexity (mutual information)
-            pw = simplicity_prior(*zip(*child.models_params[lang_id].values()))  # Simplicity prior
+            pw = simplicity_prior(
+                *zip(*child.models_params[lang_id].values())
+            )  # Simplicity prior
             pc_w = child_model.models_unnormed[lang_id].to_numpy()
             pc = pwc.sum(axis=0) if color_prior is None else color_prior
             mutual_info_h = np.nansum(pc_w * pw * (np.log(pc_w) - np.log(pc)))
@@ -273,8 +279,7 @@ class GaussianLanguageModel:
 if __name__ == "__main__":
     # Set parameters of the code here
     seed = 42
-    n_range = np.arange(1, 101, 1)  # Number of samples to draw for each language
-    language_ids = [1]  # list(range(1, 111, 1))  # ID of languages to test
+    language_ids = list(range(1, 111, 1))  # ID of languages to test
     save_matrix = False  # Whether to save trained language models
     plot_color_map = False  # Whether to create a developmental colormap
 
@@ -302,11 +307,25 @@ if __name__ == "__main__":
 
     child_model = GaussianLanguageModel(cov_prior=None)
 
+    # Number of samples to draw for each language
+    sample_range = (
+        list(range(1, 25, 1))
+        + list(range(25, 50, 5))
+        + list(range(50, 100, 10))
+        + list(range(100, 220, 20))
+        + list(range(250, 1000, 50))
+        + list(range(1000, 2100, 100))
+    )
+    n_range = np.array(sample_range)
+
     for i in tqdm(n_range):
-        # Take a new sample from the language and append it to the running list of samples
-        sample = adult_model.sample_languages(1)
+        # Take a new sample(s) from the language and append it to the running list of samples
+        # always have i number of samples in the iteration
+        sample = adult_model.sample_languages(i - (len(samples) // 110))
         samples = pd.concat([samples, sample], axis=0)
         samples = samples.sort_values("language")
+
+        samples.to_csv(f"output/learnability/{seed}/{i}_samples.csv", index=False)
 
         # Fit the child model to the samples
         child_model.load_term_data(samples)
@@ -320,8 +339,10 @@ if __name__ == "__main__":
             scores[lid].append(s)
 
             if save_matrix:
-                with open(f"output/learnability/{seed}/{lid}/{i}.npy", "wb") as f:
-                    np.save(f, child_model.models_unnormed[lid])
+                np.save(
+                    f"output/learnability/{seed}/{lid}/{i}.npy",
+                    child_model.models_unnormed[lid],
+                )
 
             if plot_color_map:
                 mode_map(
@@ -330,7 +351,9 @@ if __name__ == "__main__":
                 )
                 fig = plt.gcf()
                 fig.canvas.draw()
-                image_from_plot = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+                image_from_plot = np.frombuffer(
+                    fig.canvas.tostring_rgb(), dtype=np.uint8
+                )
                 figure_size = tuple(
                     np.array(fig.get_size_inches()[::-1] * fig.dpi, dtype=int)
                 ) + (3,)
