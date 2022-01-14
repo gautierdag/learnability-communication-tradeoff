@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from scipy.stats import multivariate_normal
+from scipy.stats import multivariate_normal, expon
 from ck_blahut_arimoto import ck_blahut_arimoto_ib
 from noga.figures import grid2img, mode_map
 from noga.tools import DKL, MI
@@ -38,6 +38,18 @@ def plot_color_prior(pc: np.array) -> None:
     plt.show()
 
 
+def simplicity_prior(mus, covs):
+    tot_bc = 0
+    for i in range(len(mus) - 1):
+        for j in range(i + 1, len(mus)):
+            comb_cov = (covs[i] + covs[j]) / 2
+            bd = (1 / 8) * (mus[i] - mus[j]).T @ np.linalg.inv(comb_cov) @ (mus[i] - mus[j]) + (1 / 2) * np.log(
+                np.linalg.det(comb_cov) / (np.sqrt(np.linalg.det(covs[i]) + np.linalg.det(covs[j]))))
+            bc = np.exp(-bd)
+            tot_bc += bc
+    return expon.pdf(len(mus) + tot_bc, scale=10)
+
+
 class GaussianLanguageModel:
     """Load and fit Gaussian models to each language from data stored in the WCS format."""
 
@@ -45,11 +57,11 @@ class GaussianLanguageModel:
     COLOR_PRIOR_EXCLUDED = [7, 19, 20, 25, 27, 31, 38, 48, 70, 80, 88, 91, 92, 93]
 
     def __init__(
-        self,
-        term_file: Union[str, pd.DataFrame] = "wcs/term.txt",
-        wcs_path: str = "wcs",
-        cov_reg: float = 1.0e-5,
-        cov_prior: np.ndarray = None,
+            self,
+            term_file: Union[str, pd.DataFrame] = "wcs/term.txt",
+            wcs_path: str = "wcs",
+            cov_reg: float = 1.0e-5,
+            cov_prior: np.ndarray = None,
     ):
         """Initialise a new model class. Language models are stored in the dictionary self.models which is indexed by
         the ID of the language.
@@ -134,7 +146,7 @@ class GaussianLanguageModel:
         return prior / len(self.models_params)
 
     def learn_languages(
-        self, language_ids: List[int] = None, progress_bar: bool = True
+            self, language_ids: List[int] = None, progress_bar: bool = True
     ) -> None:
         """Fit a Gaussian model to each language to calculate the joint distribution P(W, C). Fitted models are stored
         in the field self.models
@@ -212,16 +224,16 @@ class GaussianLanguageModel:
 
     @staticmethod
     def write_samples_file(
-        samples: pd.DataFrame, output_file: str = "sampled_term.txt"
+            samples: pd.DataFrame, output_file: str = "sampled_term.txt"
     ) -> None:
         """Write a language sample to file in the wcs/term.txt format."""
         samples.to_csv(output_file, sep="\t", index=False, header=False)
 
     @staticmethod
     def score_languages(
-        adult: "GaussianLanguageModel",
-        child: "GaussianLanguageModel",
-        color_prior: np.array = None,
+            adult: "GaussianLanguageModel",
+            child: "GaussianLanguageModel",
+            color_prior: np.array = None,
     ) -> Dict[int, np.ndarray]:
         """For each real-world language score a hypothetical child language learnt on restricted number of sampled data
         against an adult language learnt on complete data.
@@ -235,16 +247,9 @@ class GaussianLanguageModel:
             A dictionary of tuples in the form (mutual information, log-likelihood) for each language id.
         """
         scores = {}
-        # samples = child.term_data.groupby("language")
         for lang_id in child.models:
             pwc_h = child.models[lang_id].to_numpy()
             pwc = adult.models[lang_id].to_numpy()
-
-            # Simplicity prior
-            n = child.sample_size[lang_id]
-            nw = len(child.models_params[lang_id])
-            ph = 1 / np.sqrt(nw)
-            ph = simplicity_prior(*zip(*child.models_params[lang_id].values()))
 
             pwc_h_ = np.zeros_like(pwc)
             shared_idx = [
@@ -256,30 +261,27 @@ class GaussianLanguageModel:
             inf_loss = DKL(pwc, pwc_h_)
 
             # Compute complexity (mutual information)
-            pc_h = pwc_h.sum(axis=0)
+            pw = simplicity_prior(*zip(*child.models_params[lang_id].values()))  # Simplicity prior
+            pc_w = child_model.models_unnormed[lang_id].to_numpy()
             pc = pwc.sum(axis=0) if color_prior is None else color_prior
-            mutual_info_h = np.nansum(pc_h * ph * (np.log(pc_h) - np.log(pc)))
+            mutual_info_h = np.nansum(pc_w * pw * (np.log(pc_w) - np.log(pc)))
 
             scores[lang_id] = np.array([mutual_info_h, inf_loss])
         return scores
 
- def simplicity_prior(mus, covs):
-     tot_bc = 0
-     for i in range(len(mus)-1):
-         for j in range(i+1, len(mus)):
-             comb_cov = (covs[i] + covs[j])/2
-             bd = (1/8)*(mus[i] - mus[j]).T @ np.linalg.inv(comb_cov) @ (mus[i] - mus[j]) + (1/2) * np.log( np.linalg.det(comb_cov) / (np.sqrt(np.linalg.det(covs[i]) + np.linalg.det(covs[j]))) )
-             bc = np.exp(-bd)
-             tot_bc += bc
-     return expon.pdf(len(mus) + tot_bc, scale=10)
-
 
 if __name__ == "__main__":
+    # Set parameters of the code here
     seed = 42
+    n_range = np.arange(1, 101, 1)  # Number of samples to draw for each language
+    language_ids = [1]  # list(range(1, 111, 1))  # ID of languages to test
+    save_matrix = False  # Whether to save trained language models
+    plot_color_map = False  # Whether to create a developmental colormap
+
     np.seterr(divide="ignore")
     np.random.seed(seed)
 
-    if not os.path.exists(f"output/learnability/{seed}/"):
+    if save_matrix and not os.path.exists(f"output/learnability/{seed}/"):
         os.makedirs(f"output/learnability/{seed}/")
 
     adult_model = GaussianLanguageModel()
@@ -294,63 +296,60 @@ if __name__ == "__main__":
     else:
         pc = pickle.load(open("pc.p", "rb"))
 
-    # Run scoring function on various language samples
-    scores = defaultdict(list)
-    n_range = np.arange(1, 101, 1)
-    language_ids = list(range(1, 111, 1))  # run over all languages
-    lid = 47  # The language to examine
-
-    child_model = GaussianLanguageModel(cov_prior=adult_cov_prior)
-    samples = pd.DataFrame()
-
-    plot_color_map = False
     color_maps = []
+    samples = pd.DataFrame()
+    scores = defaultdict(list)
+
+    child_model = GaussianLanguageModel(cov_prior=None)
 
     for i in tqdm(n_range):
+        # Take a new sample from the language and append it to the running list of samples
         sample = adult_model.sample_languages(1)
         samples = pd.concat([samples, sample], axis=0)
         samples = samples.sort_values("language")
-        # GaussianLanguageModel.write_samples_file(sample)
-        # child_model = GaussianLanguageModel("sampled_term.txt")
+
+        # Fit the child model to the samples
         child_model.load_term_data(samples)
         child_model.learn_languages(language_ids=language_ids, progress_bar=False)
 
         for lid in language_ids:
-            if not os.path.exists(f"output/learnability/{seed}/{lid}/"):
+            if save_matrix and not os.path.exists(f"output/learnability/{seed}/{lid}/"):
                 os.makedirs(f"output/learnability/{seed}/{lid}")
 
             s = GaussianLanguageModel.score_languages(adult_model, child_model, pc)[lid]
             scores[lid].append(s)
-            with open(f"output/learnability/{seed}/{lid}/{i}.npy", "wb") as f:
-                np.save(f, child_model.models_unnormed[lid])
 
-        if plot_color_map:
-            mode_map(
-                child_model.models[lid].T.to_numpy(),
-                adult_model.models[lid].sum(axis=0)[:, None],
-            )
-            fig = plt.gcf()
-            fig.canvas.draw()
-            image_from_plot = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-            figure_size = tuple(
-                np.array(fig.get_size_inches()[::-1] * fig.dpi, dtype=int)
-            ) + (3,)
-            image_from_plot = image_from_plot.reshape(figure_size)
-            color_maps.append(image_from_plot)
+            if save_matrix:
+                with open(f"output/learnability/{seed}/{lid}/{i}.npy", "wb") as f:
+                    np.save(f, child_model.models_unnormed[lid])
+
+            if plot_color_map:
+                mode_map(
+                    child_model.models[lid].T.to_numpy(),
+                    adult_model.models[lid].sum(axis=0)[:, None],
+                )
+                fig = plt.gcf()
+                fig.canvas.draw()
+                image_from_plot = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+                figure_size = tuple(
+                    np.array(fig.get_size_inches()[::-1] * fig.dpi, dtype=int)
+                ) + (3,)
+                image_from_plot = image_from_plot.reshape(figure_size)
+                color_maps.append(image_from_plot)
 
     for lid in language_ids:
         scores_array = np.array(scores[lid])
         with open(f"output/learnability/{seed}/{lid}/scores.npy", "wb") as f:
             np.save(f, scores_array)
 
-    if plot_color_map:
-        with imageio.get_writer(f"lang_{lid}.gif", mode="I") as writer:
-            for img in color_maps:
-                writer.append_data(img)
+        if plot_color_map:
+            with imageio.get_writer(f"lang_{lid}.gif", mode="I") as writer:
+                for img in color_maps:
+                    writer.append_data(img)
 
-    plt.scatter(scores_array[:, 0], scores_array[:, 1], c=n_range, cmap="gray_r")
-    for i, coord in enumerate(scores_array):
-        plt.text(coord[0], coord[1], n_range[i])
-    plt.xlabel("MI(H, C)")
-    plt.ylabel("$D_{KL} [P(W,C) || P(W,C|H)]$")
-    plt.show()
+        plt.scatter(scores_array[:, 0], scores_array[:, 1], c=n_range, cmap="gray_r")
+        for i, coord in enumerate(scores_array):
+            plt.text(coord[0], coord[1], n_range[i])
+        plt.xlabel("MI(H, C)")
+        plt.ylabel("$D_{KL} [P(W,C) || P(W,C|H)]$")
+        plt.show()
