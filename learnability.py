@@ -8,6 +8,7 @@ from typing import List, Dict, Union
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from scipy.stats import multivariate_normal, expon
 from ck_blahut_arimoto import ck_blahut_arimoto_ib
@@ -180,12 +181,14 @@ class GaussianLanguageModel:
             for ct, subset in data.groupby("word"):
                 subset = subset[["L*", "a*", "b*"]]
 
-                mu, cov = subset.mean().to_numpy(), subset.cov().to_numpy()
+                mu = subset.mean().to_numpy()
                 if subset.shape[0] == 1:
                     if self.cov_prior is not None:
                         cov = self.cov_prior
                     else:
                         cov = np.identity(3)
+                else:
+                    cov = subset.cov().to_numpy()
                 cov += np.identity(3) * self.cov_reg
                 proba = multivariate_normal(mu, cov).pdf(self.chip_to_lab)
 
@@ -270,7 +273,7 @@ class GaussianLanguageModel:
             )  # Simplicity prior
             pc_w = child_model.models_unnormed[lang_id].to_numpy()
             pc = pwc.sum(axis=0) if color_prior is None else color_prior
-            mutual_info_h = np.nansum(pc_w * pw * (np.log(pc_w) - np.log(pc)))
+            mutual_info_h = np.nansum(pc_w * pw * (np.log2(pc_w) - np.log2(pc)))
 
             scores[lang_id] = np.array([mutual_info_h, inf_loss])
         return scores
@@ -281,14 +284,17 @@ if __name__ == "__main__":
     seed = 42
     language_ids = list(range(1, 111, 1))  # ID of languages to test
     save_matrix = False  # Whether to save trained language models
+    save_scores = True  # Whether to save the calculated score matrix
     plot_color_map = False  # Whether to create a developmental colormap
 
     np.seterr(divide="ignore")
     np.random.seed(seed)
 
-    if save_matrix and not os.path.exists(f"output/learnability/{seed}/"):
+    saving = save_scores or save_matrix
+    if saving and not os.path.exists(f"output/learnability/{seed}/"):
         os.makedirs(f"output/learnability/{seed}/")
 
+    print("Learning adult model")
     adult_model = GaussianLanguageModel()
     adult_model.learn_languages()
     adult_cov_prior = adult_model.calculate_cov_prior()
@@ -318,6 +324,8 @@ if __name__ == "__main__":
     )
     n_range = np.array(sample_range)
 
+    print("Learning hypothetical languages and scoring them")
+
     for i in tqdm(n_range):
         # Take a new sample(s) from the language and append it to the running list of samples
         # always have i number of samples in the iteration
@@ -331,8 +339,8 @@ if __name__ == "__main__":
         child_model.load_term_data(samples)
         child_model.learn_languages(language_ids=language_ids, progress_bar=False)
 
-        for lid in language_ids:
-            if save_matrix and not os.path.exists(f"output/learnability/{seed}/{lid}/"):
+        for lid in tqdm(language_ids, leave=False):
+            if saving and not os.path.exists(f"output/learnability/{seed}/{lid}/"):
                 os.makedirs(f"output/learnability/{seed}/{lid}")
 
             s = GaussianLanguageModel.score_languages(adult_model, child_model, pc)[lid]
@@ -360,19 +368,61 @@ if __name__ == "__main__":
                 image_from_plot = image_from_plot.reshape(figure_size)
                 color_maps.append(image_from_plot)
 
-    for lid in language_ids:
+    fig, ax = plt.subplots()
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
+    lang_strs = pd.read_csv("wcs/lang.txt", sep="\t", usecols=[0, 1],
+                            header=None, index_col=0, names=["id", "language"])
+
+    ploted_lids = [2, 32, 35, 108]
+
+    handles = []
+    labels = []
+    for i, lid in enumerate(ploted_lids):
         scores_array = np.array(scores[lid])
-        with open(f"output/learnability/{seed}/{lid}/scores.npy", "wb") as f:
-            np.save(f, scores_array)
+        if save_scores:
+            with open(f"output/learnability/{seed}/{lid}/scores.npy", "wb") as f:
+                np.save(f, scores_array)
 
         if plot_color_map:
             with imageio.get_writer(f"lang_{lid}.gif", mode="I") as writer:
                 for img in color_maps:
                     writer.append_data(img)
 
-        plt.scatter(scores_array[:, 0], scores_array[:, 1], c=n_range, cmap="gray_r")
-        for i, coord in enumerate(scores_array):
-            plt.text(coord[0], coord[1], n_range[i])
-        plt.xlabel("MI(H, C)")
-        plt.ylabel("$D_{KL} [P(W,C) || P(W,C|H)]$")
-        plt.show()
+        ax.quiver(*scores_array[:-1].T, *np.diff(scores_array, axis=0).T,
+                  angles='xy', scale_units='xy', scale=1,
+                  width=0.005, headwidth=2, color=colors[i]
+                  )
+        ax.scatter(scores_array[:, 0], scores_array[:, 1], s=6,
+                   edgecolor="white", linewidth=0.5)
+        handles.append(Line2D([], [], color="white", markerfacecolor=colors[i], marker="o", markersize=10))
+        labels.append(lang_strs.loc[lid, "language"])
+        # ax.text(*scores_array[-1], f"{len(adult_model.models_params[lid])}")
+
+    ax.legend(handles, labels)
+    ax.set_xlabel("Complexity; $I(H, C)$ bits")
+    ax.set_ylabel("Information Loss; $D[P_M || P_H]$ bits")
+    fig.tight_layout()
+    fig.savefig("cplx_inf_loss.pdf")
+
+    inf_loss_thres = 10.0
+    inf_loss_idx = {}
+    for lid in language_ids:
+        scores_array = np.array(scores[lid])
+        nw = len(adult_model.models_params[lid])
+        inf_loss_passed = n_range[np.argwhere(scores_array[:, 1] < inf_loss_thres)[0][0]]
+        inf_loss_idx[lid] = (nw, inf_loss_passed)
+    inf_loss_idx_s = list(sorted(inf_loss_idx.values(), key=lambda x: x[0]))
+
+    fig, ax = plt.subplots()
+    ax.scatter(*list(zip(*inf_loss_idx_s)), s=36, c="grey", edgecolor="white", linewidth=0.5)
+    for i, lid in enumerate(ploted_lids):
+        nw, infloss = inf_loss_idx[lid]
+        ax.scatter(nw, infloss, c=colors[i], s=40, edgecolor="white", linewidth=0.5)
+    ax.legend(handles, labels)
+    ax.set_xlabel("Number of Colour Terms")
+    ax.set_ylabel("Samples Count")
+    fig.tight_layout()
+    fig.savefig("nw_samples.pdf")
+
+    plt.show()
