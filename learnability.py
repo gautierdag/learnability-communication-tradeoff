@@ -10,33 +10,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from scipy.stats import multivariate_normal, expon
+from scipy.stats import multivariate_normal, expon, multinomial
 from ck_blahut_arimoto import ck_blahut_arimoto_ib
 from noga.figures import grid2img, mode_map
 from noga.tools import DKL, MI
 from tqdm import tqdm
 
 
-def plot_color_prior(pc: np.array) -> None:
-    """Plot the color matrix in the WCS format.
+def plot_color_prior(pc: np.array, ax: plt.Axes = None) -> None:
+    """ Plot the color matrix in the WCS format.
 
-    Args:
-        pc: The prior distribution over colors.
-    """
+     Args:
+         pc: The prior distribution over colors.
+     """
+    if ax is None:
+        fig, ax = plt.subplots()
     grid = np.repeat(pc[:, None], 3, axis=1) / pc.max()
     img = np.flipud(grid2img(grid))
     r = img[:, :, 0]
     g = img[:, :, 1]
     b = img[:, :, 2]
     clrs = np.array([r.flatten(), g.flatten(), b.flatten()]).T
-    ax = plt.pcolor(r, color=clrs, linewidth=0.04, edgecolors="None")
-    ax.set_array(None)
-    plt.xlim([0, 42])
-    plt.ylim([0, 10])
-    plt.xticks([])
-    plt.yticks([])
-    plt.axis("off")
-    plt.show()
+    ax.pcolor(r, color=clrs, linewidth=0.04, edgecolors="None")
+    ax.set_xlim(0, 42)
+    ax.set_ylim(0, 10)
+    ax.set_xticks([])
+    ax.set_yticks([])
 
 
 class GaussianLanguageModel:
@@ -161,9 +160,8 @@ class GaussianLanguageModel:
 
             # Fit Gaussian models to the color chips to get P(C|W)
             pc_w = []
+            pw_h = []
             model_params = {}
-            mus = np.empty((0, 3))
-            covs = np.empty((0, 3, 3))
             for ct, subset in data.groupby("word"):
                 subset = subset[["L*", "a*", "b*"]]
 
@@ -179,12 +177,14 @@ class GaussianLanguageModel:
                 proba = multivariate_normal(mu, cov).pdf(self.chip_to_lab)
 
                 model_params[ct] = (mu, cov)
-                mus = np.append(mus, [mu], 0)
-                covs = np.append(covs, [cov], 0)
                 pc_w.append(proba / sum(proba))
+                pw_h.append(len(subset))
             pc_w = np.array(pc_w)
-            pw = GaussianLanguageModel.simplicity_prior(mus, covs)
-            pwc = pc_w * pw[:, None]
+
+            # Calculate sample frequencies to get P(W|H)
+            pw_h = np.array(pw_h, dtype=np.float64)
+            pw_h /= pw_h.sum()
+            pwc = pc_w * pw_h[:, None]
 
             self.models_conditional[lang_id] = pd.DataFrame(pc_w, index=model_params.keys())
             self.models[lang_id] = pd.DataFrame(pwc, index=model_params.keys())
@@ -238,29 +238,24 @@ class GaussianLanguageModel:
         Returns:
             Probability distribution over words
         """
-        coeffs = np.empty((0,))
-        for mu_p, cov_p in zip(mus, covs):
-            tot_bc = 0.0
-            for mu_q, cov_q in zip(mus, covs):
-                if np.all(mu_p == mu_q): continue
-
-                comb_cov = (cov_p + cov_q) / 2
-                mu_diff = mu_p - mu_q
-                bd = 0.125 * mu_diff.T @ np.linalg.inv(comb_cov) @ mu_diff + 0.5 * np.log(
-                    np.linalg.det(comb_cov) / (np.sqrt(np.linalg.det(cov_p) + np.linalg.det(cov_q)))
-                    )
+        tot_bc = 0
+        for i in range(len(mus) - 1):
+            for j in range(i + 1, len(mus)):
+                comb_cov = (covs[i] + covs[j]) / 2
+                mu_diff = mus[i] - mus[j]
+                bd = 0.125 * mu_diff.T @ np.linalg.inv(comb_cov) @ mu_diff + 0.5 * \
+                    np.log(np.linalg.det(comb_cov) / (np.sqrt(np.linalg.det(covs[i]) + np.linalg.det(covs[j])))
+                )
                 bc = np.exp(-bd)
                 tot_bc += bc
-            coeffs = np.append(coeffs, tot_bc)
-        pw = np.apply_along_axis(lambda bc: expon.pdf(len(mus) + bc, scale=scale), 0, coeffs)
-        pw /= pw.sum()
-        return pw
+        return expon.pdf(len(mus) - 1 + tot_bc, scale=scale)
 
     @staticmethod
     def score_languages(
             adult: "GaussianLanguageModel",
             child: "GaussianLanguageModel",
             color_prior: np.array = None,
+            use_simplicity: bool = False
     ) -> Dict[int, np.ndarray]:
         """For each real-world language score a hypothetical child language learnt on restricted number of sampled data
         against an adult language learnt on complete data.
@@ -269,6 +264,7 @@ class GaussianLanguageModel:
              adult: The adult model learnt on complete data
              child: The child model learnt on sampled, partial data
              color_prior: The color prior
+             use_simplicity: Whether to use the simplicity prior
 
         Returns:
             A dictionary of tuples in the form (mutual information, log-likelihood) for each language id.
@@ -276,21 +272,22 @@ class GaussianLanguageModel:
         scores = {}
         for lang_id in child.models:
             pwc_h = child.models[lang_id].to_numpy()
-            pwc = adult.models[lang_id].to_numpy()
+            pwc_m = adult.models[lang_id].to_numpy()
 
-            pwc_h_ = np.zeros_like(pwc)
+            pwc_h_ = np.zeros_like(pwc_m)
             shared_idx = [
                 i
                 for i, w in enumerate(adult.models_params[lang_id])
                 if w in child.models_params[lang_id]
             ]
             pwc_h_[shared_idx, :] = pwc_h
-            inf_loss = DKL(pwc, pwc_h_)
+            inf_loss = DKL(pwc_m, pwc_h_)
 
             # Compute complexity (mutual information)
-            pc_w_h = child_model.models_conditional[lang_id].to_numpy()
-            pc = pwc.sum(axis=0) if color_prior is None else color_prior
-            mutual_info_h = np.nansum(pwc_h * (np.log2(pc_w_h) - np.log2(pc)))
+            ph = 1
+            if use_simplicity:
+                ph = GaussianLanguageModel.simplicity_prior(*zip(*child.models_params[lang_id].values()))
+            mutual_info_h = MI(pwc_h * ph)
 
             scores[lang_id] = np.array([mutual_info_h, inf_loss])
         return scores
