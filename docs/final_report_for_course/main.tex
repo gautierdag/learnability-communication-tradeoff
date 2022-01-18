@@ -22,7 +22,7 @@
 %\def\aclpaperid{***} %  Enter the acl Paper ID here
 
 
-\title{Modelling Language Communication and Learning with \\ Rate Distortion Theory}
+\title{TODO: title}
 
 % 2. Two rows of authors (set titlebox length to 7cm)
 %
@@ -49,185 +49,105 @@
 \end{abstract}
 
 \section{Introduction}
+\label{sec:intro}
+
 \section{Related Work}
+\label{sec:related_works}
+
 \section{Method}
+\label{sec:method}
 
-\subsection{Universal Components}
-\label{sec:uni_components}
+To formally define the \textit{communicative efficiency} and the \textit{learnability} of colour naming systems, we first formulate colour naming under a probabilistic framework in Section~\ref{ssec:method_uni_components}.
+We then model communication about colour terms in Section~\ref{ssec:method_comm}, and the learning problem in Section~\ref{ssec:learning}.
 
-The variables involved in this project are listed as follows:
-\begin{itemize}[leftmargin=*]
-    \item \textbf{meaning $M$\footnote{In this document, a random variable is notated by a capital letter, e.g. $M$ here, its possible values are notated by the corresponding lower case letter, e.g. $m$, and the set of its sample space is notated by the corresponding calligraphic capital letter, e.g. $\mathcal{M}$.}}: a meaning $m\in\mathcal{M}$ is \textcolor{red}{a discrete variable} indicating the possible meanings.
-    It specifies both distributions over $c$, i.e. $p(c|m)$, and distributions over words $w$, i.e. $p(w|m)$.
-    In fact, \textcolor{red}{$M$ is the core variable in our project}, and it corresponds to the source variable $X$ in the standard information theory model, \citep[e.g.][]{RDT}.
-    
-    We don't know the size of meaning space $|\mathcal{M}|$ nor $p(m)$ for each $m$.
-    In both communication problem and learning problem, we have to infer that out.
-    Or, in the language of probabilistic graphical model, $m$ is a latent variable in our setup.
-    We will also show in the Section~\ref{sec:comm}and~\ref{sec:learning} that $p(m)$ can be inferred out by algorithms similar to Expectation-Maximisation. 
+\subsection{Modelling of Colour Naming}
+\label{ssec:method_uni_components}
 
-    \item \textbf{colour chip $C$}: a colour chip $c\in\mathcal{C}$ is also a discrete integer variable indicating the possible values of colours. 
-    $\mathcal{C}$ is given in the data set, and it keeps identical across different languages (defined below). 
-    The colour palette $\mathcal{C}$ we're going to use is shown in Figure~\ref{fig:colour_palette}, where each grid corresponds to a specific $c$.
-        \begin{figure}[h]
-            \centering
-            \includegraphics[width=0.49\textwidth]{docs/intro_rate_distortion/graphs/colour_palette.jpg}
-            \caption{Colour palette introduced by \citet{berlin1991basic}}
-            \label{fig:colour_palette}
-        \end{figure}
-        
-    In this project, we will ignore the variable $u$ (``universe'') used by \citet{zaslavsky2018efficient} because the entire universe is constrained to the colour palette. 
-    Mathematically, $\mathcal{U}$ is just a superset of $\mathcal{C}$ which represents the objects in the universe.
-    
-    Same to \cite{zaslavsky2018efficient}, given a meaning $m$, we assume the conditional distribution of $c$ is a Gaussian centred at $\rc(m)$, i.e.:
-    \begin{align}
+We use the colour chip palette introduced by \citet{berlin1991basic} as a way to encapsulate the colour domain.
+The colour set $\mathcal{C}$ consists of $330$ chips $c$ that divide the colour space by luminosity and chroma.
+We define a \textit{meaning} $m\in\mathcal{M}$ as a conditional distribution over colour chips, i.e. $p(c|m)$.
+This meaning $m$ represents a colour that a speaker intends to convey.
+Similarly to \citet{zaslavsky2018efficient}, we also define each meaning $m$ as a Gaussian distribution centred at a colour chip $\rc(m)$, i.e.
+\begin{align}
     p(c|m)\propto \exp{-\frac{1}{\sigma^2}}||c-\rc(m)||^2
     \label{eq:p_c_given_m}
-    \end{align}
-    
-    In practice, we will allocate a ``mode colour chip'' for each meaning $m$, thus we use $\rc(m)$ instead of $m$ in Equation~\ref{eq:p_c_given_m}.
-    But, conceptually, it is the same to $\exp{-\frac{1}{\sigma^2}}||c-m||^2$. 
-    As you may notice, $m$ has different values from $c$, therefore putting these two together is a bit wired. 
-    
-    An example is given in Figure~\ref{fig:green_meaning}.
-        \begin{figure}[h]
-            \centering
-            \includegraphics[width=0.49\textwidth]{docs/intro_rate_distortion/graphs/green_meaning.png}
-            \caption{Meaning of ``green'' which is a Gaussian distribution over different colour chips.}
-            \label{fig:green_meaning}
-        \end{figure}
-        
-    \item \textbf{word $W$}: a discrete variable transmitted from speaker to listener. 
-    We can give each $w\in\mathcal{W}$ a name, e.g. ``blue'' for the 3rd value.
-    However, this is not necessary here since we do not care what actual word is used for some meaning. Sometimes, $\mathcal{W}$ is referred to as ``dictionary'', ``vocabulary'', or ``lexicon''.
-    Since the conditional distribution $p(w|m)$ has a name and it's an important concept in this project, so we illustrate it in the following separately.
-    
-    \item \textbf{language $p(w|m)$}: a language is the distribution of words conditioned on meanings, i.e. a language tells us the probability of emitting a word $w$ given a meaning $m$.
-    It is a.k.a. the \emph{encoder} in standard information theory terminology, and can also be written as a function $L:\mathcal{M}\rightarrow\mathcal{W}$.
-        \begin{figure}[h]
-            \centering
-            \includegraphics[width=0.49\textwidth]{docs/intro_rate_distortion/graphs/color_language.png}
-            \caption{English on the colour palette from \citet{berlin1991basic}.
-            }
-            \label{fig:language_example}
-        \end{figure}
-    
-    An example based on English is illustrated in Figure~\ref{fig:language_example}.
-    To be specific, the colour chips in the green region will all be referred by the word ``green''.
-    The boundary is hard in this example, but the naming policy $p(w|m)$ can have soft boundaries, e.g. by using Gaussian distribution.
-    
-    \item \textbf{interpretation policy $p(\hat{m}|w)$\label{par:decoder}}: an interpretation specifies the distribution of colour chips given a specific word, a.k.a. \emph{decoder} in standard information theory terminology, and can also be written as a function $I:\mathcal{W}\rightarrow\mathcal{C}$.
-    Note we use $\hat{m}$ here instead of $m$ because the two random variables have different probability mass although they have the same sample space. 
-    $\hat{m}$ is the understood or reconstructed meaning from the word $w$.
-    For example, after receiving the word ``green'', we could have a distribution over all colours that is very similar to the one in Figure~\ref{fig:green_meaning} but more skewed towards blue.
-    
-    Following \citet{zaslavsky2018efficient}, an \textcolor{red}{important assumption} of this project is that mappings between $\hat{m}$ and $w$ are \textcolor{red}{one-to-one}, i.e.
-    \begin{equation}
+\end{align}
+To make colour chips comfortably distinguishable \cite{mokrzycki2011colour}, we use $\sigma^2=64$.
+
+With a meaning from some cognitive source assumed to exist, we then define a \textbf{language} as a distribution over words conditioned on meanings, i.e. $p(w|m)$ where $w$ denotes the words from a vocabulary.
+A language is therefore the probability of emitting a word $w$ given a meaning $m$.
+
+More details on the definitions of the above random variables can be found in Appendix~\ref{appssec:uni_components}.
+
+\subsection{Communication of Colours}
+\label{ssec:method_comm}
+
+Using our definitions of language and meaning in the colour space, we can link our approach to the classical communication model proposed by \citet{shannon1948mathematical} ( Figure~\ref{fig:pipeline}).
+Under this classical model, a speaker with an intended colour $m$ communicates a word $w$ to a listener who must then interpret it.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.49\textwidth]{graphs/cog_communication.pdf}
+    \caption{
+        A communicative model of colour naming.
+        Note that the communication is about transmitting $m$ and reconstructing it as $\hat{m}$, thus there's no $c$ involved in the diagram.
+    }
+    \label{fig:pipeline}
+\end{figure}
+
+Communication starts from a cognitive source which specifies a distribution over meanings, $p(m)$. 
+A speaker (\textit{encoder} in classical communication theory) samples a meaning $m~p(m)$, and encodes the meaning into a word following a language $p(w|m)$.
+Since we focus on the semantic efficiency of languages, we assume a perfect communication channel that it is noiseless. 
+Therefore the output of the channel is identical to its input.
+After receiving a word $w$, a listener then interprets it as a meaning $\hat{m}$ following the listener's interpretation policy $p(\hat{m}|w)$.
+Is it has been proved by \citet{zaslavsky2018efficient} that a Bayesian listener (decoder in Figure~\ref{fig:pipeline}) is an optimal interpretation policy w.r.t a given language, which further leads to the listener's interpretation policy shown as follow:
+\begin{equation}
         p(\hat{m}|w) =
         \begin{cases}
             1 & \text{if $\hat{m}=w$}\\
             0 & \text{otherwise}
         \end{cases} 
-        \label{eq:bijective_mhat_w}
+        \label{eq:comm_listener}
     \end{equation}
-    
-    Rigorously speaking, $\hat{m}$ can't equal to $w$, but it is easier to write it this way. Therefore, the equivalence below holds:
-    \begin{equation}
-        p(c|w)  = \sum_{\hat{m}} p(c|\hat{m})p(\hat{m}|w)  = p(c|\hat{m})
-        \label{eq:p_mhat_and_m}
-    \end{equation}
-    
-    Similar to \citep{zaslavsky2018efficient}, by applying Bayes theorem, we can have the following equivalence:
-    \begin{equation}
-        \begin{split}
-            & p(c|\hat{m}) = p(c|w) \\
-            & = \sum_m p(c|m)p(m|w) \\
-            & = \sum_m p(c|m) \frac{p(w|m)p(m)}{p(w)} \\
-            & = \sum_m p(c|m) \frac{p(w|m)p(m)}{\sum_m p(w|m)p(m)}
-        \end{split}
-        \label{eq:bayesian_interpretation}
-    \end{equation}
-    That is, we can determine interpretation $p(c|w) = p(c|\hat{m})$ once we have an established language $p(w|m)$ and established meanings probability mass function $p(m)$.
-\end{itemize}
+which leads to that the mappings between $\hat{M}$ and $W$ are bijective, and further implies that a listener would interpret different words as different meanings.
 
-\subsection{Communication Problem}
-\label{sec:comm}
+Intuitively, an ideal language should be as simple as possible while it can conveys enough information about the colours. 
+Under the above modelling of communication, that is an ideal language should minimise its complexity (rate) and information loss (distortion) at the same time.
+This trade-off between complexity and information loss is formalised by rate distortion theory \citep[RDT,][]{shannon1959coding}.
+Since we model all meanings (and therefore words) as distributions in the colour space, this trade-off can be formalised as an information bottleneck \citep[IB,][]{tishby2000information}.
 
-We first illustrate communication problem as there is no unique variable involved in it.
-Our aim in the communication part of this project is to produce a diagram similar to the one sketched in Figure~\ref{fig:curve_comm}.
-The red line in the figure is referred as ``frontier'', and our aim is to show that it is indeed a trade-off curve.
-The calculation of each axes and the curve itself are illustrated in the following subsections.
+\noindent\textbf{Complexity of a language}:
+From an information-theoretic perspective, the complexity of a language $p(w|m)$ is defined as its information \emph{rate}, i.e. the mutual information between words $W$ and meanings $M$:
+\begin{equation}
+    I(M;W) = \sum_{m,w} p(m)p(w|m)\log \frac{p(w|m)}{p(w)}
+    \label{eq:comm_complexity_definition}
+\end{equation}
+The minimum complexity is $0$ where the speaker refer to all colours with a single word. 
+This matches with our intuition that the worst case is the language which conveys no information about the intended meaning of a speaker.
 
-It is important to note that we are going to \textcolor{red}{optimise both $P(W|M)$ and $P(M)$} in the communication problem to reduce the information loss defined in Section~\ref{ssec:lan_info_loss}.
+Given $p(m)$, the amount of information conveyed can be measured by its entropy $H(M)$, which can be further expanded as:
+\begin{equation}
+    H(M)=I(M;W)+H(M|W) 
+\end{equation}
+$I(M;W)$ is how many extra information about $m$ is conveyed by $w$, i.e. the amount of information conveyed in the language.
+Assuming that more information requires higher complexity, then the complexity of a language can be measured by $I(M;W)$, or at least, there exists a positive correlation between the two quantities.
 
-\begin{figure}[t]
-    \centering
-    \includegraphics[width=0.49\textwidth]{docs/intro_rate_distortion/graphs/communication_curve.pdf}
-    \caption{The curve we aim to plot in the communication problem.}
-    \label{fig:curve_comm}
-\end{figure}
-
-\subsection{Pipeline in Communication}
-\label{ssec:comm_pipeline}
-
-The pipeline of our model is shown in Figure~\ref{fig:pipeline}, where $\mathcal{E}$ denotes the error/loss function we're going to use.
-Note that the communication is about transmitting $m$ and reconstructing it as $\hat{m}$, thus there's no $c$ involved in the diagram.
-But, to evaluate the information loss during communication, we need $c$ as a part of the metric illustrated in Equation~\ref{eq:comm_loss_function}.
-
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.49\textwidth]{docs/intro_rate_distortion/graphs/cog_communication.pdf}
-    \caption{The pipeline of our model. We follow \citet{zaslavsky2018efficient} to assume that the communication channel is perfect/noise-less.}
-    \label{fig:pipeline}
-\end{figure}
-
-In the existing works, the common choices of $\mathcal{E}$ are indicator function $\mathbbm{1}(\hat{m}=m)$ and $KL$-divergence $D[p(c|\hat{m})||p(c|m)]$.
-since we're going to use $KL$-divergence, the full form of it is given as follow:
-
+\noindent\textbf{Information loss of a language}:
+As shown in Figure~\ref{fig:pipeline}, the information loss (\emph{distortion} in RDT and IB) between a reconstructed meaning $\hat{m}$ and the original meaning $m$ is measured by an error function $\mathcal{E}(\hat{m}, m)$.
+Since both $m$ and $\hat{m}$ are distributions over colour chips, we use the Kullback–Leibler (KL) divergence as our error function, i.e.
 \begin{equation}
 \begin{split}
     & \mathcal{E}(m,\hat{m}) \triangleq  D[m||\hat{m}] \\
     & = D[p(c|m)||p(c|\hat{m})]  \\
     % & = \sum_{c} q(c|\hat{m}) \log \frac{q(c|\hat{m})}{q(c|m)} \\
     & = \sum_{c} p(c|m) \log \frac{p(c|m)}{p(c|\hat{m})} \\
-     & = \sum_{c} p(c|m) \log \frac{p(c|m)}{p(c|\textcolor{red}{w})}
+     & = \sum_{c} p(c|m) \log \frac{p(c|m)}{p(c|w)}
 \end{split}
 \label{eq:comm_loss_function}
 \end{equation}
-where the last equivalence holds due to Equation~\ref{eq:p_mhat_and_m}.
+where the last line is due to Equation~\ref{eq:comm_listener}. 
 
-The distortion (a.k.a. information loss with $D[m||\hat{m}]$) is then defined by the expectation of our error/loss function, i.e.
-
-\begin{equation}
-    \mathbb{E}_{m,\hat{m}}\left[\mathcal{E}(m,\hat{m})\right]
-    \label{eq:distortion}
-\end{equation}
-
-
-\subsubsection{Complexity of Languages}
-\label{ssec:complexity}
-
-The complexity of our a language is defined as the mutual information between $m$ and $w$, i.e. 
-
-\begin{equation}
-    I(M;W) = \sum_{m,w} p(m)p(w|m)\log \frac{p(w|m)}{p(w)}
-    \label{eq:complexity_definition}
-\end{equation}
-
-Given $p(m)$, the amount of information conveyed can be measured by its entropy, i.e. $H(M)$.
-With $H(M)=I(M;W)+H(M|W)$, it is then straightforward to see that $I(M;W)$ is how many extra information about $m$ conveyed by $w$, i.e. the amount of information conveyed in the channel/language.
-Assuming that more information means higher complexity \textcolor{orange}{@Frank: any citation to support this assumption?}, then the complexity of a language can be measured by $I(M;W)$,
-or at least, there is a positive correlation between the two quantities.
-
-Therefore, once we have a $p(w|m)$, we can calculate its complexity by simply following Equation~\ref{eq:complexity_definition}.
-We will show later how to derive such a $p(w|m)$ in Section~\ref{ssec:comm_opt_ib}.
-
-\subsubsection{Information Loss of Languages}
-\label{ssec:lan_info_loss}
-
-As we illustrated before, given a language and an interpretation policy, we can derive $p(\hat{m}|w)$.
-Then, the joint distribution of $\hat{m}$ and $m$ is as follow:
-
+Given a language and an interpretation policy, it is then straightforward to derive the joint distribution of $\hat{m}$ and $m$ is as follow:
 \begin{equation}
     \begin{split}
         p(\hat{m},m) 
@@ -237,220 +157,165 @@ Then, the joint distribution of $\hat{m}$ and $m$ is as follow:
     \label{eq:joint_c_hat_c}
 \end{equation}
 
-Combining the above equation with Equation~\ref{eq:distortion}, the information loss can then be calculated as:
-
+Then, for a language, its information loss can then be defined as the expectation of error over the above joint distribution, formally i.e.:
 \begin{equation}
     \begin{split}
         & \mathbb{E}_{p(\hat{m},m)}\left[D[m||\hat{m}]\right] \\
-        & = \mathbb{E}_{p(\hat{m},m)}\left[ \sum_{c} p(c|m) \log \frac{p(c|m)}{p(c|w)} \right] \\
-        & = \sum_{\hat{m},m} p(\hat{m},m) \sum_{c} p(c|m) \log \frac{p(c|m)}{p(c|w)} \\
+        & = I(M;C) - I(W;C)
     \end{split}
     \label{eq:comm_info_loss}
 \end{equation}
+where $I(M;C)$ is independent of $p(w|m)$, thus we just need to minimise $-I(W;C)$ in order to reduce the expected distortion.
 
-Now, let's further factorise Equation~\ref{eq:comm_info_loss} as follows:
+The full derivation of the above result is given in Equation~\ref{eq:factorise_distortion} in Appendix~\ref{appssec:derivation_of_info_loss}.
 
-\begin{align*}
-    % \begin{aligned}
-        & \mathbb{E}_{p(\hat{m},m)}\left[D[m||\hat{m}]\right] \\
-        & = \sum_{\hat{m},m,w} p(\hat{m}|w)p(w|m)p(m) \\ 
-        & \cdot \sum_{c} p(c|m) \log \frac{p(c|m)}{p(c|w)} \\
-        & = \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m)\log \frac{p(c|m)}{p(c|w)} \\
-        & = \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m) \log p(c|m) \\
-        & - \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m) \log p(c|w) \\ 
-        & = \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m) \log \frac{p(c|m)}{p(c)} \\ 
-        & - \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m) \log \frac{p(c|w)}{p(c)} \\ 
-        & = \sum_{\hat{m},m,w,c} p(\hat{m},m,w,c) \log \frac{p(c|m)}{p(c)} \\
-        & - \sum_{\hat{m},m,w,c} p(\hat{m},m,w,c) \log \frac{p(c|w)}{p(c)} \\ 
-        & = \sum_{\cancel{\hat{m},w},m,c} p(\cancel{\hat{m},w},m,c) \log \frac{p(c|m)}{p(c)} \\ 
-        & - \sum_{\cancel{\hat{m},m},w,c} p(\cancel{\hat{m},m},w,c) \log \frac{p(c|w)}{p(c)} \\ 
-        & = \sum_{m,c} p(m,c) \log \frac{p(c|m)}{p(c)} \\ 
-        & - \sum_{w,c} p(w,c) \log \frac{p(c|w)}{p(c)} \\ 
-        & = \textcolor{red}{\sum_{m,c} p(m,c) \log \frac{p(c|m)p(m)}{p(c)p(m)}} \\ 
-        & - \textcolor{blue}{\sum_{w,c} p(w,c) \log \frac{p(c|w)p(w)}{p(c)p(w)}} \\  
-        & = \textcolor{red}{I(M;C)} - \textcolor{blue}{I(W;C)} 
-    % \end{aligned}
-    \label{eq:factorise_distortion}
-\end{align*}
-where the last line corresponds to Equation~[5] in \citep{zaslavsky2018efficient}.
-
-In the above equation, $I(M;C)$ is actually independent of $p(w|m)$, therefore we just need to minimise $-I(W;C)$ in order to reduce the expected distortion. 
-
-\subsubsection{Optimising Information Bottleneck}
-\label{ssec:comm_opt_ib}
-
-So far, everything seems fine with a given language $p(w|m)$ and a given distribution of meanings $p(m)$.
-But, there is still one question: how could we get them?
-
-One way to do so is the Information Bottleneck (IB) method \citep{IB}, i.e. minimising the following objective function:
+\noindent\textbf{Information bottleneck (IB) method}:
+To obtain optimal languages in the sense of balancing complexity and information loss, we optimise the following IB objective function:
 \begin{equation}
     \mathcal{F}[p(w|m)] = I(M;W) - \beta I(W;C)
     \label{eq:comm_IB_objective}
 \end{equation}
+where $I(M;W)$ corresponds to complexity, $-I(W;C)$ corresponds to information loss, and $\beta$ is a hyperparameter for balancing the two terms.
 
-An intuitive explanation to the above equation is that it measures how well $C$ is predicted from a compressed representation $W$ compared to its direct prediction from $M$.
-Again, we assume mapping from $W$ to $\hat{M}$ is bijective, thus reconstructing $c$ from $w$ only lose information from $\hat{m}$ to $c$ which is defined in Equation~\ref{eq:bayesian_interpretation}.
+While minimising the IB objective, iterative algorithms \citep[e.g.][]{arimoto1972algorithm, blahut1972computation} would optimise $p(m)$ and $p(w|m)$ iteratively, since they have the same concavity.
+Therefore, by solving the optimisation problem given above, we can find optimal $p(m)$, i.e. the cognitive source of meanings, and $p(w|m)$, i.e. optimal languages, at the same time.
 
-While minimising the IB objective, iterative algorithms (e.g. Blahut Arimoto\citep{BA}) would optimise $p(m)$ and $p(w|m)$ iteratively, since they have the same concavity.
-Therefore, at the end of this optimisation procedure, we can final optimal $p(m)$ and $p(w|m)$ at the same time.
-As for in the implementation, we can simply call the solver function for IB method which is provided by Frank.
+\subsection{Learning Colours}
+\label{ssec:learning}
 
-\section{Learning Problem}
-\label{sec:learning}
+%To better illustrate the learning problem, we visualise it as a directed acyclic graph shown in Figure~\ref{fig:pipeline_dag}.
+In the learning problem, our task is to infer the posterior probability measure $P(M|\mathcal{D})$ given a data set $\mathcal{D}$ consisting of word and colour chip pairs, i.e. $\mathcal{D}=\left\{w_n, c_n\right\}_{n=1}^{N}$. We call such a model an \textit{adult model}, as it corresponds to a model an adult speaker could have learnt when exposed to all of the available data. %TODO: Any reference or more accurate justification for this last statement?
 
-To better illustrate the learning problem, we visualise it as a directed acyclic graph (DAG) shown in Figure~\ref{fig:pipeline_dag}.
-In learning problem, we need to \textcolor{red}{infer $P(M)$} given a data set consists of (word, colour chip) pairs, i.e. $\mathcal{D}\left\{w_n, c_n\right\}_{n=1}^{N}$.
-Note that we use $P(M)$ to indicate that we need to infer the whole probability measure of random variable $M$.
-Since in the learning problem, we are going to verify hypotheses about meanings, we use $H$ to indicate the learnt meanings.
-But, mathematically, $H$ has the same type and domain to $M$.
+However, here we are primarily interested in understanding the role of \textit{learnability} on the development of colour term acquisition. \textcolor{orange}{@Coleman/@Frank: How do we define learnability?} We aim to achieve this by learning and comparing hypothetical models of meanings with increasing complexity. We use $H$ to indicate the set of hypothetical meanings, though mathematically $H$ has the same type and domain as $M$. Analogously to $P(M|\mathcal{D})$, we call a learnt model of hypothetical meanings $P(H|\mathcal{D}')$ a \textit{child model}, as this corresponds to a model a child with limited amounts of data (hence $\mathcal{D}'$) could have learnt.
 
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.4\textwidth]{docs/intro_rate_distortion/graphs/cog_comm_dag.pdf}
-    \caption{Illustration of learning problem in a DAG.}
-    \label{fig:pipeline_dag}
-\end{figure}
+%starting from the simplest possible model where every colour is assigned the same term.
 
-The overall objective in the learning part of our project is to plot a trade-off curve like the one shown in Figure~\ref{fig:curve_comm}, but with axes measured by different quantities.
-In learning problem, the \textcolor{red}{complexity} is measured by \textcolor{red}{$I(H;C)$}, and the \textcolor{blue}{information loss} is measured by the \textcolor{blue}{negative log-likelihood} of data samples. 
+% \begin{figure}[h]
+%     \centering
+%     \includegraphics[width=0.4\textwidth]{docs/intro_rate_distortion/graphs/cog_comm_dag.pdf}
+%     \caption{Illustration of learning problem in a DAG.}
+%     \label{fig:pipeline_dag}
+% \end{figure}
+
 
 
 \subsubsection{Optimisation Objective}
-\label{ssec:learn_optim}
+\label{sssec:learn_optim}
 
-In a more formal way, the learning problem is to maximise $P(H|\mathcal{D})$. 
-By applying Bayes', we can have the following derivation:
+Formally, the goal of the learning problem is to find a model that maximises the posterior as given by $P(H|\mathcal{D})$. By applying Bayes' Rule, we have the following derivation:
 \begin{equation}
+    \label{eq:learning_objective_pH_D}
     \begin{split}
         p(H|\mathcal{D})
         & \propto p(\mathcal{D}|H)p(H) \\
         & = \prod_{n=1}^{N} p(w_n, c_n|H)p(H)
     \end{split}
-    \label{eq:learning_objective_pH_D}
 \end{equation}
 
-To achieve this objective, we make another key assumption about $p(w|h)$, i.e. mappings between $H$ and $W$ is also \textcolor{red}{one-to-one}.
-Thus, given a pair of $\{w_n, c_n\}\in\mathcal{D}$, we can factorise it as follow:
+To calculate this objective, we make the simplifying assumption that mappings between $H$ and $W$ are one-to-one. This means, that for each meaning $h \in H$ we have exactly one unique associated colour term $w \in W$ with the property that $p(w|h)=1$. Thus, we can factorise the joint probability:
+%TODO: Citation for why we can make this one-to-one assumption?
 \begin{equation}
     \begin{aligned}
-     & p(w_n, c_n|H) = p(c_n|w_n)p(w_n|h) \\
+     & p(w, c|H) = p(c|w)p(w|h) \\
      & =
         \begin{cases}
-            p(c_n|w_n) & \text{if $h=w_n$}\\
+            p(c|w) & \text{if $h=w$}\\
             0 & \text{otherwise}
         \end{cases} 
     \end{aligned}
     \label{eq:factorise_data_pair}
 \end{equation}
 
-Following our settings in the communication problem, we still assume $p(c_n|w_n)$ is a Gaussian distribution centred at some $\rc(w_n)$.
-Then, the probabilistic model illustrated by Figure~\ref{fig:pipeline_dag} could be reduced to a Gaussian mixture model, as shown in the Figure~\ref{fig:learn_gaussian_mix} below.
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.1\textwidth]{docs/intro_rate_distortion/graphs/mixture_gaussian.pdf}
-    \caption{Model learning problem as a Gaussian mixture model.}
-    \label{fig:learn_gaussian_mix}
-\end{figure}
+Following our settings in the communication problem, we model $p(c|w)$ as a Gaussian distribution centred at some $\rc(w)$ with covariance $\Sigma(w)$. The likelihood in Equation~\ref{eq:learning_objective_pH_D} is then maximised by calculating the sample mean and covariance of colour chips $c_n$ that appear together with the colour term $w_n=w$.
 
-To estimate the parameters of this Gaussian mixture model, we can simply use the Expectation–maximisation algorithm\citep{EM} to maximise the likelihood of our data samples.
-Then, we can have modes and variances for each $h$, as well as the mixing coefficients. 
-More details can be found in the Section 9.2 of \citep{bishop2006pattern}.
-Note that the $X$ in Bishop's book should be replaced with $C$, and $Z$ should be replaced with $W$.
+Furthermore, we define the prior over hypotheses $p(H)$ to prefer simpler models over more complex ones, following previously observed behaviour of children~\cite{todo}. \textcolor{orange}{@Coleman: Could you add a description of how the simplicity prior is calculated?}
 
-\subsection{Trade-off Implied by Maximising a Posterior}
-\label{ssec:learn_tradeoff}
 
-Since the logarithm is a monotonic function, the maximum of $P(H|\mathcal{D})$ is also the maximum of $\log P(H|\mathcal{D})$. 
-Therefore, to maximise Equation~\ref{eq:learning_objective_pH_D}, it's the same to maximise the following log-likelihood of hypothesis $H$:
+
+\subsubsection{Measuring Learnability}\label{sssec:learnability}
+Similarly to the communication problem, the complexity of a language in the learning problem is given by the mutual information between $H$ and $C$, which is calculated as $ I(H;C) = \sum_{h,c} p(c|h)p(h)\log\frac{p(c|h)}{p(c)}$. This definition provides a way to measure the amount of information conveyed by the hypothetical language about the colour space. %TOOD: Least informative prior?
+
+% The prior colour-chip distribution $p(C)$ is given by the least informative prior as described in~\cite{zaslavsky2018efficient}. This formulation is equivalent to mixising the mutual information $I_q(W;C)$ and can be evaluated using the Blahut-Arimoto algorithm. We call this prior the least informative prior because it maximises the expected KL-divergence between prior and posterior:
+
+% \begin{align*}
+%     % \begin{split}
+%         & I_q(W;C)\\
+%         &  = \sum_{w,c} p(w)p(c|w)\log \frac{p(c|w)}{p(c)} \\
+%         &  = \sum_{w} p(w) \sum_c p(c|w)\log \frac{p(c|w)}{p(c)} \\
+%         &  = \sum_{w} p(w) D[p(c|w)||p(c)] \\
+%         & = \mathbb{E}_{W}[D[p(c|w)||p(c)]
+%     % \end{split}
+%     \label{eq:least_informative_prior}
+% \end{align*}
+
+% A prior distribution is calculated over all real-world languages following the formulation:
+
+% \[p(C)=\argmax_{p(C)} H(C)-H_q(C|W)\]
+
+% That is, we aim to maximise the uncertainty about our prior colour distribution while minimising the expected uncertainty of $c$ given $w$. Here $H_q(C|W)=-\sum_{c,w} p(c)p(w|c)\log \frac{p(c|w)}{p(c)}$ is the conditional entropy. 
+
+The definition of information loss in the learning problem is based on the idea that child models are trained on a subset of the data to which the adult model has access and therefore child models cannot encode more information. The exact information-loss is then measured as the KL-divergence of the child model from the adult model given by $D_{KL}[P(M|\mathcal{D})||P(H|\mathcal{D}')]$.
+
+Our method for generating hypothetical languages mimics children's learning process~\cite{todo} and proceeds as follows. We iteratively accumulate a data set by adding samples drawn from the adult model. On each iteration, we train a new child model on this increasingly larger data set. The child model is then evaluated according to the measures defined above and the scores are recorded. Finally, we can show how the child models learn as they are exposed to more data by plotting the measured complexities against the information-losses.
+\textcolor{orange}{@Coleman/@Frank: How can we use this to draw conclusions about learnability?}
+
+
+\subsubsection{Trade-off Implied by Maximising the Posterior}
+\label{sssec:learn_tradeoff}
+
+% Since the logarithm is a monotonic function, the maximum of $P(H|\mathcal{D})$ is also the maximum of $\log P(H|\mathcal{D})$. Therefore, to maximise Equation~\ref{eq:learning_objective_pH_D}, it's the same to maximise the following log-likelihood of hypothesis $H$:
+
+By choosing to optimise the posterior distribution, we can draw a parallel to the IB method of the communication problem in Section~\ref{ssec:method_comm}. Since the logarithm is a monotonic function, for optimisation we can consider the decomposition of the log-posterior:
 \begin{align*}
     % \begin{split}
-        & \log p(H|\mathcal{D}) \\
-        & \propto \log \prod_{n=1}^{N} p(w_n, c_n|H)p(H) \\
+        & \log p(H|\mathcal{D}) \propto \log \prod_{n=1}^{N} p(w_n, c_n|H)p(H) \\
         &  =\sum_{n=1}^{N} \log p(H) p(w_n, c_n|H) \\
-        &  =\sum_{n=1}^{N} \log p(H) \log p(w_n, c_n|H) \\
+        % &  =\sum_{n=1}^{N} \log p(H) \log p(w_n, c_n|H) \\
         % &  =\underbrace{N\log p(H)}_{\text{constant, simplicity}} + \underbrace{\sum_{n=1}^{N} \log p(w_n, c_n|H)}_{\text{variable, information loss}} \\
         &  =N\cdot\underbrace{\log p(H)}_{\text{constant}} + \underbrace{\sum_{n=1}^{N} \log p(w_n, c_n|H)}_{\text{variable}} \\
     % \end{split}
     \label{eq:learning_objective_log_pH_D}
 \end{align*}
 
-Note that in the above equation, it consists of two terms: 1) $\log p(H)$ which is a constant; 2) $\sum_{n=1}^{N} \log p(w_n, c_n|H)$ is a variable.
-Therefore, we can imagine that the number of samples $N$ plays a similar role to the $\beta$ hyper-parameter in the communication problem. 
-To be more specific, if $N$ is very small, then the log-likelihood would dominate $\log p(H|\mathcal{D})$, otherwise, $p(H)$ would dominate.
-
-\subsubsection{Complexity of Hypotheses}
-\label{ssec:learn_complexity}
-
-After solving the estimation problem illustrated in Section~\ref{ssec:learn_optim}, for each $h\in\mathcal{H}$, we will have a corresponding mode $\rc(h)$, and variance $\Sigma(h)$. 
-At the same time, we will also have a mixing coefficient $\pi_n$ for every $c_n$ in the dataset.
-Therefore, we can easily calculate the mutual information between $H$ and $C$ as follow:
-\begin{equation}
-    I(H;C) = \sum_{h,c} p(c|h)p(h)\log\frac{p(c|h)}{p(c)}
-\end{equation}
-
-% Regarding the prior on hypotheses $p(h)$, we can assume an Minimum Description Length prior.
-% \textcolor{orange}{@Coleman: can you provide more details about MDL prior?}
-
-We sample $p(H) \sim DP(B, \alpha)$, a Dirichlet-process with given base distribution $B$ and scaling parameter $\alpha$. For Gaussian mixture model $B$ is defined as $\mathcal{N}(\Bar{X},1)$, where $\Bar{X}$ is the mean of the input data (see \ref{ssec:color_dataset}). The scaling parameter $\alpha$ is set to \textit{what?}. Reference for using DP?
-
-For the prior colour-chip distribution we use the least informative prior as defined by \cite{zaslavsky2018efficient}. A single prior distribution is calculated for all languages following the formulation:
-
-\[p(c)=\argmax_{p(c)} H(C)-H_q(C|W)\]
-
-That is, we aim to maximise the uncertainty about our prior colour distribution while minimising the expected uncertainty of $c$ given $w$. Here $H_q(C|W)=-\sum_{c,w} p(c)p(w|c)\log \frac{p(c|w)}{p(c)}$ is the conditional entropy. This formulation is equivalent to mixising the mutual information $I_q(W;C)$ and can be evaluated using the Blahut-Arimoto algorithm. We call this prior the least informative prior because it maximises the expected KL-divergence between prior and posterior:
-
-\begin{align*}
-    % \begin{split}
-        & I_q(W;C)\\
-        &  = \sum_{w,c} p(w)p(c|w)\log \frac{p(c|w)}{p(c)} \\
-        &  = \sum_{w} p(w) \sum_c p(c|w)\log \frac{p(c|w)}{p(c)} \\
-        &  = \sum_{w} p(w) D[p(c|w)||p(c)] \\
-        & = \mathbb{E}_{W}[D[p(c|w)||p(c)]
-    % \end{split}
-    \label{eq:least_informative_prior}
-\end{align*}
-
-simulate actual kid learning
-use schedule m
-calculate likelihood over all the color chips and average, multiply by N to get number of data points
-that is beta for tradeoff
-
-p(H) dirichlet process prior -- favor as few lumps (gaussians) as possible
-penalize the gaussian prior on how close the means and std dev
-8 terms in english, 8 gaussians, reward gaussians that are basically the same thing
-reward gaussian with similar means
-reward wider std deviation
+% Note that in the above equation, it consists of two terms: 1) $\log p(H)$ which is a constant; 2) $\sum_{n=1}^{N} \log p(w_n, c_n|H)$ is a variable.
+We can view the number of samples $N$ to play a similar role to the $\beta$ hyper-parameter in the IB method. If $N$ is very small, then the log-likelihood $\log p(H|\mathcal{D})$ would dominate, which is mathematically an alternative measure of information loss (see Appendix~\ref{appssec:ll_learning_loss}). Otherwise, $p(H)$ dominates which corresponds to the a priori complexity of our hypothesis.
 
 
-ideally variational/dirichlet
 
-generate hypotheses with a schedule, each hypotheses get n data points on the schedule
-oversample lower end
+% \subsubsection{Complexity of Hypotheses}
+% \label{ssec:learn_complexity}
 
-information loss not on training data but on WCS data (uniform)
+% After solving the estimation problem illustrated in Section~\ref{ssec:learn_optim}, for each $h\in\mathcal{H}$, we will have a corresponding mode $\rc(h)$, and variance $\Sigma(h)$. 
+% At the same time, we will also have a mixing coefficient $\pi_n$ for every $c_n$ in the dataset.
+% Therefore, we can easily calculate the mutual information between $H$ and $C$ as follow:
+% \begin{equation}
+%     I(H;C) = \sum_{h,c} p(c|h)p(h)\log\frac{p(c|h)}{p(c)}
+% \end{equation}
 
-multiply the plot (information loss) by N the number of data points for the hypothesis (dont)
+% simulate actual kid learning
+% use schedule m
+% calculate likelihood over all the color chips and average, multiply by N to get number of data points
+% that is beta for tradeoff
 
-or just plot at N=1 :D
+% p(H) dirichlet process prior -- favor as few lumps (gaussians) as possible
+% penalize the gaussian prior on how close the means and std dev
+% 8 terms in english, 8 gaussians, reward gaussians that are basically the same thing
+% reward gaussian with similar means
+% reward wider std deviation
 
-\subsection{Information Loss of Hypotheses}
-\label{ssec:learn_info_loss}
 
-In this section, we are going to show why negative log-likelihood could be used as a measure for the information loss in learning problem.
-Suppose the distribution of colour chips from dataset $\mathcal{D}$ is $\mathcal{D}(c)$.
-Then, we can still used the KL-divergence as a measure for information loss between dataset and the estimated $p(c|H)$.
-Considering that $\mathcal{D}(c)$ is still a one-hot distribution, we can factorise the KL-divergence between $\mathcal{D}(c)$ and $p(c|H)$ as follows:
-\begin{equation}
-    \begin{split}
-        D[\mathcal{D}(c)||p(c|H)] & = \sum_{c} \mathcal{D}(c)\log \frac{\mathcal{D}(c)}{p(c|H)} \\
-        & = \log \frac{1}{p(c=c_n|H)} \\
-        & = -\log p(c=c_n|H)
-    \end{split}
-    \label{eq:learn_info_loss}
-\end{equation}
+% ideally variational/dirichlet
 
-Therefore, the negative log-likelihood is naturally a measure for the information loss in learning problem.
-Fortunately, we would have this quantity once we solve the estimation problem in Section~\ref{ssec:learn_optim}.
+% generate hypotheses with a schedule, each hypotheses get n data points on the schedule
+% oversample lower end
+
+% information loss not on training data but on WCS data (uniform)
+
+% multiply the plot (information loss) by N the number of data points for the hypothesis (dont)
+
+% or just plot at N=1 :D
+
+
 
 \section{Experiment}
 \label{sec:experiment}
@@ -516,13 +381,14 @@ The procedure of one run for our experiment is illustrated in the following Proc
     % \small
     \SetAlgoLined
     \SetAlgorithmName{Procedure}{}
-    \KwIn{Input: $\beta$, $N$} \\
+    \KwIn{Input: $\mathcal{D}$, $\beta$, $N$} \\
+    1. [Learn] Fit adult model $P(M|\mathcal{D})$ on $\mathcal{D}$; \\
+    3. [Learn] Sample a dataset $\mathcal{D'}$ consisting of $N$ pairs of $\{w,c\}$ following the distribution $\sum_m p(w|m)p(c|m)p(m)$; \\
+    2. [Learn] Record complexity and information loss
+    3. [Learn] Sample a dataset $\mathcal{D}$ consists of $N$ pairs of $\{w,c\}$ following the distribution $\sum_m p(w|m)p(c|m)p(m)$; \\
     1. [Comm] Set an IB objective with $\beta$; \\
     2. [Comm] Minimise IB objective by optimising $p(w|m)$ and $p(m)$; \\
     3. [Comm] Record complexity $I(M;W)$ and information loss $-I(W;C)$ \\
-    3. [Comm] Sample a dataset $\mathcal{D}$ consists of $N$ pairs of $\{w,c\}$ following the distribution $\sum_m p(w|m)p(c|m)p(m)$; \\
-    4. [Learn] Fit a Gaussian mixture model on $\mathcal{D}$; \\
-    5. [Learn] Record complexity $I(H;C)$ and information loss $-\sum_n\log p(w_n,c_n|H)$.
  \caption{Procedure for one run of experiment. ``Comm'' represent a step in communication problem, and ``Learn'' represents a step in learning problem.}
  \label{al:exp_procedure}
 \end{algorithm}
@@ -532,10 +398,166 @@ Regard the values of $N$, we can vary it from $20$ to $400$ with step size $20$.
 Once we have the complexity and information loss values in both problems for a pair of $(\beta, N)$, we can plot one point in the communication curve like shown in Figure~\ref{fig:curve_comm}, and another point in the learning curve.
 
 \section{Results}
+\label{sec:results}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{docs/final_report_for_course/graphs/color_efficiency.png}
+    \caption{The communicative efficiency of real languages plots along the frontier.}
+    \label{fig:communicative_efficiency}
+\end{figure}
+
+\subsection{Learning Problem}
+\label{ssec:results_learning}
+
+ 
 \section{Discussion}
 \section{Conclusion}
 
 \bibliographystyle{acl_natbib}
 \bibliography{main}
+
+\appendix
+
+\section{More Details about the Modelling of Colour Naming}
+\label{appsec:more_details}
+
+\subsection{Random Variables Involved in Colour Naming}
+\label{appssec:uni_components}
+
+The variables involved in this project are listed as follows:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{meaning $M$\footnote{In this document, a random variable is notated by a capital letter, e.g. $M$ here, its possible values are notated by the corresponding lower case letter, e.g. $m$, and the set of its sample space is notated by the corresponding calligraphic capital letter, e.g. $\mathcal{M}$.}}: a meaning $m\in\mathcal{M}$ is a discrete variable indicating the possible meanings.
+    It specifies both distributions over $c$, i.e. $p(c|m)$, and distributions over words $w$, i.e. $p(w|m)$.
+    In fact, $M$ is the core variable in our project, and it corresponds to the source variable $X$ in the standard information theory model.
+    
+    We don't know the size of meaning space $|\mathcal{M}|$ nor $p(m)$ for each $m$.
+    In both communication problem and learning problem, we have to infer that out.
+    Or, in the language of probabilistic graphical model, $m$ is a latent variable in our setup.
+
+    \item \textbf{colour chip $C$}: a colour chip $c\in\mathcal{C}$ is also a discrete integer variable indicating the possible values of colours. 
+    $\mathcal{C}$ is given in the data set, and it stays identical across different languages (defined below). 
+    The colour palette $\mathcal{C}$ we're going to use is shown in Figure~\ref{fig:colour_palette}, where each grid corresponds to a specific $c$.
+        \begin{figure}[h]
+            \centering
+            \includegraphics[width=0.49\textwidth]{docs/intro_rate_distortion/graphs/colour_palette.jpg}
+            \caption{Colour palette introduced by \citet{berlin1991basic}}
+            \label{fig:colour_palette}
+        \end{figure}
+        
+    In this project, we will ignore the variable $u$ (``universe'') used by \citet{zaslavsky2018efficient} because the entire universe is constrained to the colour palette. 
+    Mathematically, $\mathcal{U}$ is just a superset of $\mathcal{C}$ which represents the objects in the universe.
+    
+    Same to \cite{zaslavsky2018efficient}, given a meaning $m$, we assume the conditional distribution of $c$ is a Gaussian centred at $\rc(m)$, i.e. Equation~\ref{eq:p_c_given_m}.
+    
+    In practice, we will allocate a ``mode colour chip'' for each meaning $m$, thus we use $\rc(m)$ instead of $m$ in Equation~\ref{eq:p_c_given_m}.
+    But, conceptually, it is the same to $\exp{-\frac{1}{\sigma^2}}||c-m||^2$. 
+    As you may notice, $m$ has different values from $c$, therefore this is a slight abuse of notation.
+    
+    An example is given in Figure~\ref{fig:green_meaning}.
+        \begin{figure}[h]
+            \centering
+            \includegraphics[width=0.49\textwidth]{docs/intro_rate_distortion/graphs/green_meaning.png}
+            \caption{Meaning of ``green'' which is a Gaussian distribution over different colour chips.}
+            \label{fig:green_meaning}
+        \end{figure}
+        
+    \item \textbf{word $W$}: a discrete variable transmitted from speaker to listener. 
+    We can give each $w\in\mathcal{W}$ a name, e.g. ``blue'' for the 3rd value.
+    However, this is not necessary here since we do not care what actual word is used for some meaning. Sometimes, $\mathcal{W}$ is referred to as ``dictionary'', ``vocabulary'', or ``lexicon''.
+    Since the conditional distribution $p(w|m)$ has a name and it's an important concept in this project, so we illustrate it in the following separately.
+    
+    \item \textbf{language $p(w|m)$}: a language is the distribution of words conditioned on meanings, i.e. a language tells us the probability of emitting a word $w$ given a meaning $m$.
+    It is a.k.a. the \emph{encoder} in standard information theory terminology, and can also be written as a function $L:\mathcal{M}\rightarrow\mathcal{W}$.
+        \begin{figure}[h]
+            \centering
+            \includegraphics[width=0.49\textwidth]{docs/intro_rate_distortion/graphs/color_language.png}
+            \caption{English on the colour palette from \citet{berlin1991basic}.
+            }
+            \label{fig:language_example}
+        \end{figure}
+    
+    An example based on English is illustrated in Figure~\ref{fig:language_example}.
+    To be specific, the colour chips in the green region will all be referred by the word ``green''.
+    The boundary is hard in this example, but the naming policy $p(w|m)$ can have soft boundaries, e.g. by using Gaussian distribution.
+    
+    \item \textbf{interpretation policy $p(\hat{m}|w)$\label{par:decoder}}: an interpretation specifies the distribution of colour chips given a specific word, a.k.a. \emph{decoder} in standard information theory terminology, and can also be written as a function $I:\mathcal{W}\rightarrow\mathcal{C}$.
+    Note we use $\hat{m}$ here instead of $m$ because the two random variables have different probability mass although they have the same sample space. 
+    $\hat{m}$ is the understood or reconstructed meaning from the word $w$.
+    For example, after receiving the word ``green'', we could have a distribution over all colours that is very similar to the one in Figure~\ref{fig:green_meaning} but more skewed towards blue.
+    
+    Following \citet{zaslavsky2018efficient}, an important assumption of this project is that mappings between $\hat{m}$ and $w$ are one-to-one, i.e.
+    \begin{equation}
+        p(\hat{m}|w) =
+        \begin{cases}
+            1 & \text{if $\hat{m}=w$}\\
+            0 & \text{otherwise}
+        \end{cases} 
+        \label{eq:bijective_mhat_w}
+    \end{equation}
+    
+    Rigorously speaking, $\hat{m}$ can't equal to $w$, but it is easier to write it this way. Therefore, the equivalence below holds:
+    \begin{equation}
+        p(c|w)  = \sum_{\hat{m}} p(c|\hat{m})p(\hat{m}|w)  = p(c|\hat{m})
+        \label{eq:p_mhat_and_m}
+    \end{equation}
+    
+    Similar to \citep{zaslavsky2018efficient}, by applying Bayes theorem, we can have the following equivalence:
+    \begin{equation}
+        \begin{split}
+            & p(c|\hat{m}) = p(c|w) \\
+            & = \sum_m p(c|m)p(m|w) \\
+            & = \sum_m p(c|m) \frac{p(w|m)p(m)}{p(w)} \\
+            & = \sum_m p(c|m) \frac{p(w|m)p(m)}{\sum_m p(w|m)p(m)}
+        \end{split}
+        \label{eq:bayesian_interpretation}
+    \end{equation}
+    That is, we can determine interpretation $p(c|w) = p(c|\hat{m})$ once we have an established language $p(w|m)$ and established meanings probability mass function $p(m)$.
+\end{itemize}
+
+\subsection{Full Derivation of Information Loss of a Language}
+\label{appssec:derivation_of_info_loss}
+
+The full derivation of Equation~\ref{eq:comm_info_loss} is given as follows:
+\begin{equation}
+   \begin{aligned}
+        & \mathbb{E}_{p(\hat{m},m)}\left[D[m||\hat{m}]\right] \\
+        & = \sum_{\hat{m},m,w} p(\hat{m}|w)p(w|m)p(m) \\ 
+        & \cdot \sum_{c} p(c|m) \log \frac{p(c|m)}{p(c|w)} \\
+        & = \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m)\log \frac{p(c|m)}{p(c|w)} \\
+        & = \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m) \log p(c|m) \\
+        & - \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m) \log p(c|w) \\ 
+        & = \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m) \log \frac{p(c|m)}{p(c)} \\ 
+        & - \sum_{\hat{m},m,w,c} p(\hat{m}|w)p(w|m)p(m)p(c|m) \log \frac{p(c|w)}{p(c)} \\ 
+        & = \sum_{\hat{m},m,w,c} p(\hat{m},m,w,c) \log \frac{p(c|m)}{p(c)} \\
+        & - \sum_{\hat{m},m,w,c} p(\hat{m},m,w,c) \log \frac{p(c|w)}{p(c)} \\ 
+        & = \sum_{\cancel{\hat{m},w},m,c} p(\cancel{\hat{m},w},m,c) \log \frac{p(c|m)}{p(c)} \\ 
+        & - \sum_{\cancel{\hat{m},m},w,c} p(\cancel{\hat{m},m},w,c) \log \frac{p(c|w)}{p(c)} \\ 
+        & = \sum_{m,c} p(m,c) \log \frac{p(c|m)}{p(c)} \\ 
+        & - \sum_{w,c} p(w,c) \log \frac{p(c|w)}{p(c)} \\ 
+        & = {\sum_{m,c} p(m,c) \log \frac{p(c|m)p(m)}{p(c)p(m)}} \\ 
+        & - {\sum_{w,c} p(w,c) \log \frac{p(c|w)p(w)}{p(c)p(w)}} \\  
+        & = {I(M;C)} - {I(W;C)} 
+    \end{aligned} 
+     \label{eq:factorise_distortion}
+\end{equation}
+
+
+\subsection{Log-Likelihood as Information-Loss for the Learning Problem}
+\label{appssec:ll_learning_loss}
+
+In this section, we show why negative log-likelihood could be used as an alternative measure for the information loss of the learning problem. Suppose the true distribution of colour chips and terms from the dataset $\mathcal{D}$ is $\mathcal{D}(w,c)$. \textcolor{orange}{@Shawn: Why is this a one-hot encoded distribution?} Given a data point ($w_n,c_n$), we can calculate the KL-divergence between the true distribution and the learnt joint $p(w,c|H)$:
+% Considering that $\mathcal{D}(c)$ is still a one-hot distribution, we can factorise the KL-divergence between $\mathcal{D}(c)$ and $p(c|H)$ as follows:
+\begin{equation}
+    \begin{split}
+        & D[\mathcal{D}(w,c)||p(w,c|H)] \\ 
+        & = \sum_{w,c} \mathcal{D}(w,c)\log \frac{\mathcal{D}(w,c)}{p(w,c|H)} \\
+        & = \log \frac{1}{p(w=w_n,c=c_n|H)} \\
+        & = -\log p(w_n,c_n|H)
+    \end{split}
+    \label{eq:learn_info_loss}
+\end{equation}
+
+Therefore, the negative log-likelihood is naturally a measure for the information loss in learning problem.
 
 \end{document}
