@@ -335,6 +335,8 @@ if __name__ == "__main__":
         + list(range(100, 220, 20))
         + list(range(250, 1000, 50))
         + list(range(1000, 2100, 100))
+        + list(range(3000, 10001, 1000))
+        + list(range(20000, 100001, 10000))
     )
     n_range = np.array(sample_range)
 
