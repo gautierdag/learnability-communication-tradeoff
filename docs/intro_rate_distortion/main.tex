@@ -410,7 +410,8 @@ After solving the estimation problem illustrated in Section~\ref{ssec:learn_opti
 At the same time, we will also have a mixing coefficient $\pi_n$ for every $c_n$ in the dataset.
 Therefore, we can easily calculate the mutual information between $H$ and $C$ as follow:
 \begin{equation}
-    I(H;C) = \sum_{h,c} p(c|h)p(h)\log\frac{p(c|h)}{p(c)}
+    I(H;C) = \sum_{h,c} p(c|w,h)p(w|h)p(h)\log\frac{p(c|h)}{p(c)}
+p(c, w | h)=p(c,w,h)/p(h)
 \end{equation}
 
 % Regarding the prior on hypotheses $p(h)$, we can assume an Minimum Description Length prior.
