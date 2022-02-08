@@ -1,3 +1,4 @@
+from builtins import enumerate
 from collections import defaultdict
 import pickle
 
@@ -296,10 +297,11 @@ class GaussianLanguageModel:
 if __name__ == "__main__":
     # Set parameters of the code here
     seed = 42
-    language_ids = list(range(1, 111, 1))  # ID of languages to test
+    language_ids = [2] #list(range(1, 111, 1))  # ID of languages to test
     save_matrix = False  # Whether to save trained language models
-    save_scores = True  # Whether to save the calculated score matrix
-    plot_color_map = False  # Whether to create a developmental colormap
+    save_scores = False  # Whether to save the calculated score matrix
+    save_samples = False  # Whether to write samples file
+    plot_color_map = True  # Whether to create a developmental colormap
 
     np.seterr(divide="ignore")
     np.random.seed(seed)
@@ -324,8 +326,9 @@ if __name__ == "__main__":
     color_maps = []
     samples = pd.DataFrame()
     scores = defaultdict(list)
+    scores_h = defaultdict(list)
 
-    child_model = GaussianLanguageModel(cov_prior=None)
+    child_model = GaussianLanguageModel(cov_prior=adult_cov_prior)
 
     # Number of samples to draw for each language
     sample_range = (
@@ -349,7 +352,8 @@ if __name__ == "__main__":
         samples = pd.concat([samples, sample], axis=0)
         samples = samples.sort_values("language")
 
-        samples.to_csv(f"output/learnability/{seed}/{i}_samples.csv", index=False)
+        if save_samples:
+            samples.to_csv(f"output/learnability/{seed}/{i}_samples.csv", index=False)
 
         # Fit the child model to the samples
         child_model.load_term_data(samples)
@@ -361,6 +365,8 @@ if __name__ == "__main__":
 
             s = GaussianLanguageModel.score_languages(adult_model, child_model, pc)[lid]
             scores[lid].append(s)
+            s = GaussianLanguageModel.score_languages(adult_model, child_model, pc, use_simplicity=True)[lid]
+            scores_h[lid].append(s)
 
             if save_matrix:
                 np.save(
@@ -374,6 +380,7 @@ if __name__ == "__main__":
                     adult_model.models[lid].sum(axis=0)[:, None],
                 )
                 fig = plt.gcf()
+                fig.tight_layout()
                 fig.canvas.draw()
                 image_from_plot = np.frombuffer(
                     fig.canvas.tostring_rgb(), dtype=np.uint8
@@ -383,6 +390,7 @@ if __name__ == "__main__":
                 ) + (3,)
                 image_from_plot = image_from_plot.reshape(figure_size)
                 color_maps.append(image_from_plot)
+                fig.savefig(f"plots/color_space_{lid}_{i}.jpg")
 
     fig, ax = plt.subplots()
     prop_cycle = plt.rcParams['axes.prop_cycle']
@@ -394,11 +402,14 @@ if __name__ == "__main__":
 
     handles = []
     labels = []
-    for i, lid in enumerate(ploted_lids):
+    for i, lid in enumerate(language_ids):
         scores_array = np.array(scores[lid])
+        scores_array_h = np.array(scores_h[lid])
         if save_scores:
             with open(f"output/learnability/{seed}/{lid}/scores.npy", "wb") as f:
                 np.save(f, scores_array)
+            with open(f"output/learnability/{seed}/{lid}/scores_h.npy", "wb") as f:
+                np.save(f, scores_array_h)
 
         if plot_color_map:
             with imageio.get_writer(f"lang_{lid}.gif", mode="I") as writer:
@@ -407,19 +418,27 @@ if __name__ == "__main__":
 
         ax.quiver(*scores_array[:-1].T, *np.diff(scores_array, axis=0).T,
                   angles='xy', scale_units='xy', scale=1,
+                  width=0.002, headwidth=1, color="grey"
+                  )
+        ax.scatter(scores_array[:, 0], scores_array[:, 1], s=4, c="grey",
+                   edgecolor="white", linewidth=0.25)
+
+    for i, lid in enumerate(ploted_lids):
+        scores_array = np.array(scores[lid])
+        ax.quiver(*scores_array[:-1].T, *np.diff(scores_array, axis=0).T,
+                  angles='xy', scale_units='xy', scale=1,
                   width=0.005, headwidth=2, color=colors[i]
                   )
         ax.scatter(scores_array[:, 0], scores_array[:, 1], s=6,
                    edgecolor="white", linewidth=0.5)
         handles.append(Line2D([], [], color="white", markerfacecolor=colors[i], marker="o", markersize=10))
         labels.append(lang_strs.loc[lid, "language"])
-        # ax.text(*scores_array[-1], f"{len(adult_model.models_params[lid])}")
 
     ax.legend(handles, labels)
     ax.set_xlabel("Complexity; $I(H, C)$ bits")
     ax.set_ylabel("Information Loss; $D[P_M || P_H]$ bits")
     fig.tight_layout()
-    fig.savefig("cplx_inf_loss.pdf")
+    # fig.savefig("cplx_inf_loss.pdf")
 
     inf_loss_thres = 10.0
     inf_loss_idx = {}
@@ -439,6 +458,6 @@ if __name__ == "__main__":
     ax.set_xlabel("Number of Colour Terms")
     ax.set_ylabel("Samples Count")
     fig.tight_layout()
-    fig.savefig("nw_samples.pdf")
+    # fig.savefig("nw_samples.pdf")
 
     plt.show()
