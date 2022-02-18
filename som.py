@@ -99,6 +99,7 @@ class SelfOrganisingMap:
                        for lid, _ in self.term_data.groupby("language")}
 
         # Frequentist sampling distribution
+        self.word_map = defaultdict(dict)
         self.pst = None
         self.get_sampling_distribution()
 
@@ -183,6 +184,7 @@ class SelfOrganisingMap:
                 s_freq = term_data.groupby("chip").size().reindex(np.arange(1, NUM_CHIPS + 1), fill_value=0)
                 ps_t[i, :] = s_freq / term_data.shape[0]
                 pt[i] = term_data.shape[0]
+                self.word_map[lid][i] = term
             if self.sampling == "corpus":
                 pt /= pt.sum()
             elif self.sampling == "uniform":
@@ -282,36 +284,40 @@ class SelfOrganisingMap:
 
         return np.concatenate([term_feature, color_feature])
 
-    def get_wcs_form(self, samples: np.ndarray) -> pd.DataFrame:
+    def get_wcs_form(self, samples: Tuple[np.ndarray, np.ndarray], language_id: int) -> pd.DataFrame:
         """ Return the samples in the WCS form."""
-        words_list = list(self.models_params[lang_id].keys())
-        for idx in sample_idx:
-            word_idx, chip_idx = idx // pwc.shape[1], idx % pwc.shape[1]
+        wcs_samples = []
+        for sample in zip(*samples):
+            word_idx, chip_idx = sample
 
             speaker = 1
             color = chip_idx + 1
-            word = words_list[word_idx]
+            word = self.word_map[language_id][word_idx]
 
-            samples.append((lang_id, speaker, color, word))
+            wcs_samples.append((language_id, speaker, color, word))
+        return pd.DataFrame(wcs_samples, columns=["language", "speaker", "chip", "word"])
 
     def score(self, samples: np.ndarray, language_id: int) -> np.ndarray:
         """ Score the current model for information loss and complexity """
         pts_h = self.predict(language_ids=[language_id])[0] * self.ps
 
         # Compute information loss as KL-divergence from adult model
-        inf_loss = DKL(self.pst[language_id], pts_h.T)
-        # likelihood = self.predict(samples[:, self.term_size[language_id]:], [language_id])[0]
-        # ll = np.log(likelihood / likelihood.sum())
-        # ll[ll == -np.inf] = 0
-        # inf_loss = np.sum(ll)
+        # inf_loss = DKL(self.pst[language_id], pts_h.T)
+        likelihood = self.predict(samples[:, self.term_size[language_id]:], [language_id])[0]
+        ll = np.log(likelihood / likelihood.sum())
+        ll[ll == -np.inf] = 0
+        inf_loss = np.sum(ll)
 
         # Compute complexity (mutual information)
-        ph = 1
-        mutual_info_h = MI(pts_h * ph)
+        mutual_info_h = MI(pts_h)
 
         return np.array([mutual_info_h, inf_loss])
 
-    def learn_languages(self, n: int, scoring_steps: List[int] = None, language_ids: List[int] = None) \
+    def learn_languages(self,
+                        n: int,
+                        scoring_steps: List[int] = None,
+                        language_ids: List[int] = None,
+                        save_samples: str = None) \
             -> Dict[int, List[Tuple[float, float]]]:
         """ Train the SOM on the given data set and number of time steps.
 
@@ -319,6 +325,7 @@ class SelfOrganisingMap:
             n: The number of time steps to train for
             scoring_steps: The time steps at which to score the models
             language_ids: The languages to train
+            save_samples: The directory to save samples to
 
         Returns:
             A list of pairs of model scores with the same size as eval_steps
@@ -331,6 +338,13 @@ class SelfOrganisingMap:
             index_matrix = np.arange(0, size * NUM_CHIPS)
             pts = self.pst[lid].flatten()
             samples = tuple(np.unravel_index(np.random.choice(index_matrix, n, p=pts), (size, NUM_CHIPS)))
+
+            if save_samples is not None:
+                path = os.path.join(os.path.join(save_samples, str(lid)))
+                if not os.path.exists(path):
+                    os.mkdir(path)
+                self.get_wcs_form(samples, lid).to_csv(os.path.join(path, f"{n}_samples.csv"),
+                                                       sep="\t", index=False, header=False)
 
             samples_seen = []
             m = self.models[lid]
@@ -376,10 +390,17 @@ if __name__ == '__main__':
     seed = 42
     save_xling = True  # Whether to save the cross-linguistic feature space after calculation
     grid_search = False
-    save_samples = False
+    save_samples = True
 
     np.seterr(divide="ignore")
     np.random.seed(seed)
+
+    if not os.path.exists("output"):
+        os.mkdir("output")
+    if not os.path.exists("output/som"):
+        os.mkdir("output/som")
+    if not os.path.exists(f"output/som/{seed}"):
+        os.mkdir(f"output/som/{seed}")
 
     if grid_search:
         features = {"features": ["xling", "perc"],
@@ -418,7 +439,12 @@ if __name__ == '__main__':
     for args in product_dict(**features):
         print(args)
         som = SelfOrganisingMap(**args)
-        scores_dict = som.learn_languages(sample_range[-1], scoring_steps=sample_range, language_ids=lids)
+        scores_dict = som.learn_languages(sample_range[-1],
+                                          scoring_steps=sample_range,
+                                          language_ids=lids,
+                                          save_samples=os.path.join(
+                                              "output", "som", str(seed)) if save_samples else None
+                                          )
 
         plt.figure()
         preds = som.predict(language_ids=lids)
