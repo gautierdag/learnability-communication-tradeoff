@@ -34,6 +34,13 @@ def fit_ib(p_xy, qinit, focalbeta, betas, tol=0.05, verbose=0):
         result = score_q_kl(p_xy, qprev)
 
         qsm = mergecols(qprev, tol=tol)
+
+        # @TODO: ADD SAVING HERE -> maybe including seed in filepath as well?
+        # np.save(
+        #     f"output/frontier_qs/b{beta}_r{result.rate}_d{result.distortion}_l{qsm.shape[1]}",
+        #     qsm,
+        # )
+
         # NB: compute minimum expected length using merged matrix
         e_len = ibsoln_elen(qsm, p_x)
         ibs[i] = (result.rate, result.distortion, e_len)

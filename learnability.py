@@ -1,3 +1,4 @@
+from builtins import enumerate
 from collections import defaultdict
 import pickle
 
@@ -10,49 +11,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from scipy.stats import multivariate_normal, expon
+from scipy.stats import multivariate_normal, expon, multinomial
 from ck_blahut_arimoto import ck_blahut_arimoto_ib
 from noga.figures import grid2img, mode_map
 from noga.tools import DKL, MI
 from tqdm import tqdm
 
 
-def plot_color_prior(pc: np.array) -> None:
-    """Plot the color matrix in the WCS format.
+def plot_color_prior(pc: np.array, ax: plt.Axes = None) -> None:
+    """ Plot the color matrix in the WCS format.
 
-    Args:
-        pc: The prior distribution over colors.
-    """
+     Args:
+         pc: The prior distribution over colors.
+     """
+    if ax is None:
+        fig, ax = plt.subplots()
     grid = np.repeat(pc[:, None], 3, axis=1) / pc.max()
     img = np.flipud(grid2img(grid))
     r = img[:, :, 0]
     g = img[:, :, 1]
     b = img[:, :, 2]
     clrs = np.array([r.flatten(), g.flatten(), b.flatten()]).T
-    ax = plt.pcolor(r, color=clrs, linewidth=0.04, edgecolors="None")
-    ax.set_array(None)
-    plt.xlim([0, 42])
-    plt.ylim([0, 10])
-    plt.xticks([])
-    plt.yticks([])
-    plt.axis("off")
-    plt.show()
-
-
-def simplicity_prior(mus, covs):
-    tot_bc = 0
-    for i in range(len(mus) - 1):
-        for j in range(i + 1, len(mus)):
-            comb_cov = (covs[i] + covs[j]) / 2
-            bd = (1 / 8) * (mus[i] - mus[j]).T @ np.linalg.inv(comb_cov) @ (
-                mus[i] - mus[j]
-            ) + (1 / 2) * np.log(
-                np.linalg.det(comb_cov)
-                / (np.sqrt(np.linalg.det(covs[i]) + np.linalg.det(covs[j])))
-            )
-            bc = np.exp(-bd)
-            tot_bc += bc
-    return expon.pdf(len(mus) + tot_bc, scale=10)
+    ax.pcolor(r, color=clrs, linewidth=0.04, edgecolors="None")
+    ax.set_xlim(0, 42)
+    ax.set_ylim(0, 10)
+    ax.set_xticks([])
+    ax.set_yticks([])
 
 
 class GaussianLanguageModel:
@@ -62,11 +46,11 @@ class GaussianLanguageModel:
     COLOR_PRIOR_EXCLUDED = [7, 19, 20, 25, 27, 31, 38, 48, 70, 80, 88, 91, 92, 93]
 
     def __init__(
-        self,
-        term_file: Union[str, pd.DataFrame] = "wcs/term.txt",
-        wcs_path: str = "wcs",
-        cov_reg: float = 1.0e-5,
-        cov_prior: np.ndarray = None,
+            self,
+            term_file: Union[str, pd.DataFrame] = "wcs/term.txt",
+            wcs_path: str = "wcs",
+            cov_reg: float = 1.0e-5,
+            cov_prior: np.ndarray = None,
     ):
         """Initialise a new model class. Language models are stored in the dictionary self.models which is indexed by
         the ID of the language.
@@ -81,7 +65,7 @@ class GaussianLanguageModel:
         self.cov_reg = cov_reg
         self.cov_prior = cov_prior
         self.models = {}
-        self.models_unnormed = {}
+        self.models_conditional = {}
         self.models_params = {}
 
         self.chip_data = pd.read_csv(
@@ -151,7 +135,7 @@ class GaussianLanguageModel:
         return prior / len(self.models_params)
 
     def learn_languages(
-        self, language_ids: List[int] = None, progress_bar: bool = True
+            self, language_ids: List[int] = None, progress_bar: bool = True
     ) -> None:
         """Fit a Gaussian model to each language to calculate the joint distribution P(W, C). Fitted models are stored
         in the field self.models
@@ -177,6 +161,7 @@ class GaussianLanguageModel:
 
             # Fit Gaussian models to the color chips to get P(C|W)
             pc_w = []
+            pw_h = []
             model_params = {}
             for ct, subset in data.groupby("word"):
                 subset = subset[["L*", "a*", "b*"]]
@@ -194,12 +179,15 @@ class GaussianLanguageModel:
 
                 model_params[ct] = (mu, cov)
                 pc_w.append(proba / sum(proba))
+                pw_h.append(len(subset))
             pc_w = np.array(pc_w)
-            pwc = pc_w / pc_w.sum()
 
-            self.models_unnormed[lang_id] = pd.DataFrame(
-                pc_w, index=model_params.keys()
-            )
+            # Calculate sample frequencies to get P(W|H)
+            pw_h = np.array(pw_h, dtype=np.float64)
+            pw_h /= pw_h.sum()
+            pwc = pc_w * pw_h[:, None]
+
+            self.models_conditional[lang_id] = pd.DataFrame(pc_w, index=model_params.keys())
             self.models[lang_id] = pd.DataFrame(pwc, index=model_params.keys())
             self.models_params[lang_id] = model_params
 
@@ -231,16 +219,44 @@ class GaussianLanguageModel:
 
     @staticmethod
     def write_samples_file(
-        samples: pd.DataFrame, output_file: str = "sampled_term.txt"
+            samples: pd.DataFrame, output_file: str = "sampled_term.txt"
     ) -> None:
         """Write a language sample to file in the wcs/term.txt format."""
         samples.to_csv(output_file, sep="\t", index=False, header=False)
 
     @staticmethod
+    def simplicity_prior(mus: np.ndarray, covs: np.ndarray, scale: float = 20.918) -> np.ndarray:
+        """ Calculate the Bhattacharyya coefficient between the learnt distributions and sample from an exponential
+        distribution based on the distances and the number of learnt distribution.
+
+        Ref: https://en.wikipedia.org/wiki/Bhattacharyya_distance#Bhattacharyya_coefficient
+
+        Args:
+            mus: The means of the learnt distributions
+            covs: The covariances of the learnt distributions
+            scale: Scale parameter for the exponential distribution
+
+        Returns:
+            Probability distribution over words
+        """
+        tot_bc = 0
+        for i in range(len(mus) - 1):
+            for j in range(i + 1, len(mus)):
+                comb_cov = (covs[i] + covs[j]) / 2
+                mu_diff = mus[i] - mus[j]
+                bd = 0.125 * mu_diff.T @ np.linalg.inv(comb_cov) @ mu_diff + 0.5 * \
+                    np.log(np.linalg.det(comb_cov) / (np.sqrt(np.linalg.det(covs[i]) + np.linalg.det(covs[j])))
+                )
+                bc = np.exp(-bd)
+                tot_bc += bc
+        return expon.pdf(len(mus) - 1 + tot_bc, scale=scale)
+
+    @staticmethod
     def score_languages(
-        adult: "GaussianLanguageModel",
-        child: "GaussianLanguageModel",
-        color_prior: np.array = None,
+            adult: "GaussianLanguageModel",
+            child: "GaussianLanguageModel",
+            color_prior: np.array = None,
+            use_simplicity: bool = False
     ) -> Dict[int, np.ndarray]:
         """For each real-world language score a hypothetical child language learnt on restricted number of sampled data
         against an adult language learnt on complete data.
@@ -249,6 +265,7 @@ class GaussianLanguageModel:
              adult: The adult model learnt on complete data
              child: The child model learnt on sampled, partial data
              color_prior: The color prior
+             use_simplicity: Whether to use the simplicity prior
 
         Returns:
             A dictionary of tuples in the form (mutual information, log-likelihood) for each language id.
@@ -256,24 +273,22 @@ class GaussianLanguageModel:
         scores = {}
         for lang_id in child.models:
             pwc_h = child.models[lang_id].to_numpy()
-            pwc = adult.models[lang_id].to_numpy()
+            pwc_m = adult.models[lang_id].to_numpy()
 
-            pwc_h_ = np.zeros_like(pwc)
+            pwc_h_ = np.zeros_like(pwc_m)
             shared_idx = [
                 i
                 for i, w in enumerate(adult.models_params[lang_id])
                 if w in child.models_params[lang_id]
             ]
             pwc_h_[shared_idx, :] = pwc_h
-            inf_loss = DKL(pwc, pwc_h_)
+            inf_loss = DKL(pwc_m, pwc_h_)
 
             # Compute complexity (mutual information)
-            pw = simplicity_prior(
-                *zip(*child.models_params[lang_id].values())
-            )  # Simplicity prior
-            pc_w = child_model.models_unnormed[lang_id].to_numpy()
-            pc = pwc.sum(axis=0) if color_prior is None else color_prior
-            mutual_info_h = np.nansum(pc_w * pw * (np.log2(pc_w) - np.log2(pc)))
+            ph = 1
+            if use_simplicity:
+                ph = GaussianLanguageModel.simplicity_prior(*zip(*child.models_params[lang_id].values()))
+            mutual_info_h = MI(pwc_h * ph)
 
             scores[lang_id] = np.array([mutual_info_h, inf_loss])
         return scores
@@ -282,10 +297,11 @@ class GaussianLanguageModel:
 if __name__ == "__main__":
     # Set parameters of the code here
     seed = 42
-    language_ids = list(range(1, 111, 1))  # ID of languages to test
+    language_ids = [2] #list(range(1, 111, 1))  # ID of languages to test
     save_matrix = False  # Whether to save trained language models
-    save_scores = True  # Whether to save the calculated score matrix
-    plot_color_map = False  # Whether to create a developmental colormap
+    save_scores = False  # Whether to save the calculated score matrix
+    save_samples = False  # Whether to write samples file
+    plot_color_map = True  # Whether to create a developmental colormap
 
     np.seterr(divide="ignore")
     np.random.seed(seed)
@@ -310,8 +326,9 @@ if __name__ == "__main__":
     color_maps = []
     samples = pd.DataFrame()
     scores = defaultdict(list)
+    scores_h = defaultdict(list)
 
-    child_model = GaussianLanguageModel(cov_prior=None)
+    child_model = GaussianLanguageModel(cov_prior=adult_cov_prior)
 
     # Number of samples to draw for each language
     sample_range = (
@@ -321,6 +338,8 @@ if __name__ == "__main__":
         + list(range(100, 220, 20))
         + list(range(250, 1000, 50))
         + list(range(1000, 2100, 100))
+        + list(range(3000, 10001, 1000))
+        + list(range(20000, 100001, 10000))
     )
     n_range = np.array(sample_range)
 
@@ -333,7 +352,8 @@ if __name__ == "__main__":
         samples = pd.concat([samples, sample], axis=0)
         samples = samples.sort_values("language")
 
-        samples.to_csv(f"output/learnability/{seed}/{i}_samples.csv", index=False)
+        if save_samples:
+            samples.to_csv(f"output/learnability/{seed}/{i}_samples.csv", index=False)
 
         # Fit the child model to the samples
         child_model.load_term_data(samples)
@@ -345,11 +365,13 @@ if __name__ == "__main__":
 
             s = GaussianLanguageModel.score_languages(adult_model, child_model, pc)[lid]
             scores[lid].append(s)
+            s = GaussianLanguageModel.score_languages(adult_model, child_model, pc, use_simplicity=True)[lid]
+            scores_h[lid].append(s)
 
             if save_matrix:
                 np.save(
                     f"output/learnability/{seed}/{lid}/{i}.npy",
-                    child_model.models_unnormed[lid],
+                    child_model.models_conditional[lid],
                 )
 
             if plot_color_map:
@@ -358,6 +380,7 @@ if __name__ == "__main__":
                     adult_model.models[lid].sum(axis=0)[:, None],
                 )
                 fig = plt.gcf()
+                fig.tight_layout()
                 fig.canvas.draw()
                 image_from_plot = np.frombuffer(
                     fig.canvas.tostring_rgb(), dtype=np.uint8
@@ -367,6 +390,7 @@ if __name__ == "__main__":
                 ) + (3,)
                 image_from_plot = image_from_plot.reshape(figure_size)
                 color_maps.append(image_from_plot)
+                fig.savefig(f"plots/color_space_{lid}_{i}.jpg")
 
     fig, ax = plt.subplots()
     prop_cycle = plt.rcParams['axes.prop_cycle']
@@ -378,11 +402,14 @@ if __name__ == "__main__":
 
     handles = []
     labels = []
-    for i, lid in enumerate(ploted_lids):
+    for i, lid in enumerate(language_ids):
         scores_array = np.array(scores[lid])
+        scores_array_h = np.array(scores_h[lid])
         if save_scores:
             with open(f"output/learnability/{seed}/{lid}/scores.npy", "wb") as f:
                 np.save(f, scores_array)
+            with open(f"output/learnability/{seed}/{lid}/scores_h.npy", "wb") as f:
+                np.save(f, scores_array_h)
 
         if plot_color_map:
             with imageio.get_writer(f"lang_{lid}.gif", mode="I") as writer:
@@ -391,19 +418,27 @@ if __name__ == "__main__":
 
         ax.quiver(*scores_array[:-1].T, *np.diff(scores_array, axis=0).T,
                   angles='xy', scale_units='xy', scale=1,
+                  width=0.002, headwidth=1, color="grey"
+                  )
+        ax.scatter(scores_array[:, 0], scores_array[:, 1], s=4, c="grey",
+                   edgecolor="white", linewidth=0.25)
+
+    for i, lid in enumerate(ploted_lids):
+        scores_array = np.array(scores[lid])
+        ax.quiver(*scores_array[:-1].T, *np.diff(scores_array, axis=0).T,
+                  angles='xy', scale_units='xy', scale=1,
                   width=0.005, headwidth=2, color=colors[i]
                   )
         ax.scatter(scores_array[:, 0], scores_array[:, 1], s=6,
                    edgecolor="white", linewidth=0.5)
         handles.append(Line2D([], [], color="white", markerfacecolor=colors[i], marker="o", markersize=10))
         labels.append(lang_strs.loc[lid, "language"])
-        # ax.text(*scores_array[-1], f"{len(adult_model.models_params[lid])}")
 
     ax.legend(handles, labels)
     ax.set_xlabel("Complexity; $I(H, C)$ bits")
     ax.set_ylabel("Information Loss; $D[P_M || P_H]$ bits")
     fig.tight_layout()
-    fig.savefig("cplx_inf_loss.pdf")
+    # fig.savefig("cplx_inf_loss.pdf")
 
     inf_loss_thres = 10.0
     inf_loss_idx = {}
@@ -423,6 +458,6 @@ if __name__ == "__main__":
     ax.set_xlabel("Number of Colour Terms")
     ax.set_ylabel("Samples Count")
     fig.tight_layout()
-    fig.savefig("nw_samples.pdf")
+    # fig.savefig("nw_samples.pdf")
 
     plt.show()
