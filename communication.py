@@ -1,73 +1,11 @@
 from typing import Tuple
-from typing import Tuple, List
 import pandas as pd
 import numpy as np
 from numpy.typing import ArrayLike
-from itertools import product
-from string import ascii_uppercase
 from scipy.stats import multivariate_normal
-
+import glob
 
 NUM_MEANINGS = 330
-
-
-class LanguageSampler(object):
-    def __init__(self, fpath: str = None) -> None:
-        super().__init__()
-        self.fpath = fpath
-        self.prob_matrix = None
-        self.read_prob_matrix()
-
-    def read_prob_matrix(self) -> ArrayLike:
-        with open(self.fpath, "rb") as f:
-            self.prob_matrix = np.load(f)
-
-    def sample_index(self) -> Tuple:
-        word_idx = np.random.choice(
-            self.prob_matrix.shape[0], replace=True, p=self.prob_matrix.sum(axis=1)
-        )
-        chip_idx = np.random.choice(
-            self.prob_matrix.shape[1], replace=True, p=self.prob_matrix.sum(axis=0)
-        )
-        return word_idx, chip_idx
-
-    def sample_language(self, N: int = 1) -> Tuple[List, List]:
-        idx2colour = {idx: idx for idx in range(330)}
-        words = ["".join(i) for i in product(ascii_uppercase, repeat=2)]
-        idx2word = {idx: word for idx, word in enumerate(words)}
-
-        word_list = []
-        colour_list = []
-        for _ in range(N):
-            word_idx, chip_idx = self.sample_index()
-            word = idx2word[word_idx]
-            colour = idx2colour[chip_idx]
-
-            word_list.append(word)
-            colour_list.append(colour)
-
-        return word_list, colour_list
-
-    @staticmethod
-    def output_language_file(
-        words: list,
-        colours: list,
-        opath: str = "./lan.txt",
-        lan_idx: int = 1,
-        spk_idx: int = 1,
-    ) -> None:
-        with open(opath, "a") as f:
-            for word, colour in zip(words, colours):
-                print(
-                    str(lan_idx)
-                    + "\t"
-                    + str(spk_idx)
-                    + "\t"
-                    + str(colour)
-                    + "\t"
-                    + word,
-                    file=f,
-                )
 
 
 class MutualInfoCalculator(object):
@@ -207,9 +145,52 @@ class MutualInfoCalculator(object):
         return mi
 
 
+class LanguageSampler:
+    def __init__(self, fpath: str = None) -> None:
+        super().__init__()
+        self.fpath = fpath
+        with open(self.fpath, "rb") as f:
+            self.prob_matrix = np.load(f)
+        self.num_words = self.prob_matrix.shape[1]
+        assert self.prob_matrix.shape[0] == 330, "q matrix must be 330xW"
+        assert self.prob_matrix.sum() == 1, "q matrix sum must = 1"
+
+    def sample_indices(self, n: int) -> Tuple[ArrayLike, ArrayLike]:
+        # Create a flat copy of the 2D joint distribution
+        flat = self.prob_matrix.flatten()
+
+        # Then, sample an index from the 1D array with the
+        # probability distribution from the original array
+        sample_index = np.random.choice(a=flat.size, p=flat, size=n, replace=True)
+
+        # Take this index and adjust it so it matches the original array
+        chip_indices, word_indices = np.unravel_index(
+            sample_index, self.prob_matrix.shape
+        )
+
+        return chip_indices, word_indices
+
+
 if __name__ == "__main__":
-    sampler = LanguageSampler("./tmp_test.npy")
-    sample_words, sample_colours = sampler.sample_language(N=10)
-    sampler.output_language_file(sample_words, sample_colours)
-    sample_words, sample_colours = sampler.sample_language(N=20)
-    sampler.output_language_file(sample_words, sample_colours, lan_idx=2, spk_idx=2)
+
+    files = glob.glob("frontier/q_matrices/*")
+
+    N = 1000  # number of samples to sample from frontier language
+    betas = []
+    rates = []
+    distortions = []
+    for f in files:
+        beta, rate, distortion = f.split("/")[-1].split("_")
+        distortion = distortion.split(".npy")[0]
+        beta, rate, distortion = float(beta), float(rate), float(distortion)
+        betas.append(beta)
+        rates.append(rate)
+        distortions.append(distortion)
+        sampler = LanguageSampler(f)
+        # @NOTE: sampler.num_words will tell you how many words are in the language
+
+        # c and w are the chip and word indices as arrays of size N
+        c, w = sampler.sample_indices(N)
+
+        # @TODO: use these samples to learn SOM and plot/save results somewhere
+        raise NotImplementedError()
