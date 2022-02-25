@@ -103,10 +103,11 @@ def ck_blahut_arimoto_ib(
         q_y_t = next_q_y_t(q_t_x)
         if divergence == "entropy":
             lq_y_t = np.log2(q_y_t)
-            distortions = np.array([-np.nansum(row * lq_y_t, axis=1) for row in p_y_x])
-        elif divergence == "kl-divergence":
+            lq_y_t[lq_y_t == -np.inf] = 0
+            distortions = -p_y_x @ lq_y_t.T
+        elif divergence == "kl":
             lq_y_t = np.log2(q_y_t)
-            distortions = np.array([-np.nansum(row * (np.log2(row) - lq_y_t), axis=1) for row in p_y_x])
+            distortions = np.array([np.nansum(row * (np.log2(row) - lq_y_t), axis=1) for row in p_y_x])
         else:
             distortions = np.asarray(
                 [divergence(a, b) for a in p_y_x for b in q_y_t]

@@ -7,14 +7,14 @@ PRECISION = 1e-16
 
 # score q using KL divergence for distortion
 def score_q_kl(p_xy, q):
-    result, q_xyt = ck_blahut_arimoto_ib(p_xy, 1, q, divergence=my_kl, max_iters=0)
+    result, q_xyt = ck_blahut_arimoto_ib(p_xy, 1, q, divergence="kl", max_iters=0)
     return result
 
 
 # fit IB model
 
 
-def fit_ib(p_xy, qinit, focalbeta, betas, tol=0.05, verbose=0):
+def fit_ib(p_xy, qinit, focalbeta, betas, tol=0.05, verbose=0, divergence=None):
     qs = [[] for b in betas]
     ibs = [[] for b in betas]
     qseq = []
@@ -26,7 +26,10 @@ def fit_ib(p_xy, qinit, focalbeta, betas, tol=0.05, verbose=0):
     prevresultsize = qsm.shape[1]
 
     for i, beta in enumerate(betas):
-        result, q_xyt = ck_blahut_arimoto_ib(p_xy, beta, qprev, max_iters=1000)
+        if divergence is not None:
+            result, q_xyt = ck_blahut_arimoto_ib(p_xy, beta, qprev, divergence=divergence, max_iters=1000)
+        else:
+            result, q_xyt = ck_blahut_arimoto_ib(p_xy, beta, qprev, max_iters=1000)
         q_xt = np.sum(q_xyt, axis=1)
         qprev = q_xt / q_xt.sum(axis=1, keepdims=True)
         qs[i] = qprev

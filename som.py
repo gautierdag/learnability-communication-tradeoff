@@ -7,13 +7,13 @@ from typing import Tuple, List, Dict, Union
 
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from matplotlib import pyplot as plt
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 from ck_blahut_arimoto import ck_blahut_arimoto_ib
 from noga.figures import mode_map
-from noga.tools import MI
-
+from noga.tools import MI, DKL
 
 NUM_CHIPS = 330
 COLOR_PRIOR_EXCLUDED = [7, 19, 20, 25, 27, 31, 38, 48, 70, 80, 88, 91, 92, 93]
@@ -32,15 +32,15 @@ class SelfOrganisingMap:
     COLOR_PRIOR_EXCLUDED = [7, 19, 20, 25, 27, 31, 38, 48, 70, 80, 88, 91, 92, 93]
 
     def __init__(
-        self,
-        size: int,
-        alpha: float,
-        sigma: float,
-        term_weight: float,
-        wcs_path: str = "wcs",
-        features: str = "perc",
-        sampling: str = "corpus",
-        color_prior: str = "uniform",
+            self,
+            size: int,
+            alpha: float,
+            sigma: float,
+            term_weight: float,
+            wcs_path: str = "wcs",
+            features: str = "perc",
+            sampling: str = "corpus",
+            color_prior: str = "uniform",
     ):
         """Initialise a new self-organising map.
 
@@ -115,7 +115,7 @@ class SelfOrganisingMap:
 
         # Frequentist sampling distribution
         self.word_map = defaultdict(dict)
-        self.pst = None
+        self.pts = None
         self.get_sampling_distribution()
 
         # Color prior (semantic space prior)
@@ -123,7 +123,7 @@ class SelfOrganisingMap:
         self.calculate_color_prior()
 
         # Get the same frequentist data distribution but as p(t|s)p(s)
-        self.pts = None
+        self.pst = None
         # self.get_term_distribution()
 
         # Map coordinate array for calculating d_map
@@ -154,6 +154,11 @@ class SelfOrganisingMap:
             self.sem_data = self.chip_to_lab
 
         self.distance_matrix = self.get_distance_matrix()
+
+    def reset_models(self):
+        """ Reset every learnt model to all zeroes"""
+        for mid, model in self.models.items():
+            self.models[mid] = np.zeros_like(model, dtype=np.float64)
 
     def get_xling_features(self) -> np.ndarray:
         """Calculate the cross linguistic feature space for each colour chip."""
@@ -200,8 +205,8 @@ class SelfOrganisingMap:
             for i, (term, term_data) in enumerate(data.groupby("word")):
                 s_freq = (
                     term_data.groupby("chip")
-                    .size()
-                    .reindex(np.arange(1, NUM_CHIPS + 1), fill_value=0)
+                        .size()
+                        .reindex(np.arange(1, NUM_CHIPS + 1), fill_value=0)
                 )
                 ps_t[i, :] = s_freq / term_data.shape[0]
                 pt[i] = term_data.shape[0]
@@ -211,8 +216,8 @@ class SelfOrganisingMap:
             elif self.sampling == "uniform":
                 pt = 1 / size
             dists[lid] = ps_t * pt[:, None]
-        self.pst = dists
-        return self.pst
+        self.pts = dists
+        return self.pts
 
     def get_term_distribution(self):
         """Calculate the same term and chip distribution but as p(t|s)p(s)."""
@@ -233,13 +238,13 @@ class SelfOrganisingMap:
             elif self.sampling == "uniform":
                 ps = 1 / size
             dists[lid] = pt_s * ps[:, None]
-        self.pts = dists
-        return self.pts
+        self.pst = dists
+        return self.pst
 
     def calculate_color_prior(self):
         """Calculate capacity-inducing prior over the colour chip space."""
         if self.color_prior == "uniform":
-            self.ps = np.full(NUM_CHIPS, 1 / NUM_CHIPS)
+            self.ps = np.full(NUM_CHIPS, 1 / NUM_CHIPS)[:, None]
         elif self.color_prior == "capacity":
             if os.path.exists("ps.p"):
                 self.ps = pickle.load(open("ps.p", "rb"))[:, None]
@@ -247,15 +252,25 @@ class SelfOrganisingMap:
 
             L = 0
             ps = np.zeros(self.chip_data.shape[0])
-            for lid, pst in tqdm(
-                self.pst.items(), desc="Calculating capacity-inducing prior"
+            for lid, q in tqdm(
+                    self.pts.items(), desc="Calculating capacity-inducing prior"
             ):
                 if lid in self.COLOR_PRIOR_EXCLUDED:
                     continue
-                _, q_wst = ck_blahut_arimoto_ib(
-                    pst, 1, np.full(pst.shape, 1 / pst.size), "kl-divergence"
-                )
-                pls = q_wst.sum(axis=0).sum(axis=1)
+
+                q = q.T
+                num_cols = q.shape[1]
+                if num_cols < 330:
+                    duplicate_vector = np.ones(num_cols, dtype=int)
+                    duplicate_vector[-1] = 331 - num_cols
+                    q = np.repeat(q, duplicate_vector, axis=1)
+                q[:, 330 - duplicate_vector[-1]:] /= duplicate_vector[-1]
+                q[np.isnan(q)] = 0
+                # uniform dist for q va
+                q[q.sum(1) == 0] = 1 / q.shape[0]
+
+                result, q_tsx = ck_blahut_arimoto_ib(q, 1, np.eye(330), divergence="entropy", max_iters=1000)
+                pls = q_tsx.sum(axis=0).sum(axis=1)
                 ps += pls
                 L += 1
             ps /= L
@@ -308,7 +323,7 @@ class SelfOrganisingMap:
         return np.concatenate([term_feature, color_feature])
 
     def get_wcs_form(
-        self, samples: Tuple[np.ndarray, np.ndarray], language_id: int
+            self, samples: Tuple[np.ndarray, np.ndarray], language_id: int
     ) -> pd.DataFrame:
         """Return the samples in the WCS form."""
         wcs_samples = []
@@ -326,34 +341,34 @@ class SelfOrganisingMap:
 
     def score(self, samples: np.ndarray, language_id: int, save=None) -> np.ndarray:
         """Score the current model for information loss and complexity"""
-        pts_h = self.predict(language_ids=[language_id])[0]
+        pt_s_h = self.predict_t_s(language_ids=[language_id])[0]
         if save is not None:
-            np.save(save, pts_h)
+            np.save(save, pt_s_h)
 
-        pts_h *= self.ps
+        pst_h = pt_s_h * self.ps
 
         # Compute information loss as KL-divergence from adult model
-        # inf_loss = DKL(self.pst[language_id], pts_h.T)
-        likelihood = self.predict(
-            samples[:, self.term_size[language_id] :], [language_id]
-        )[0]
-        ll = np.log(likelihood / likelihood.sum())
-        ll[ll == -np.inf] = 0
-        inf_loss = np.sum(ll)
+        inf_loss = DKL(self.pts[language_id], pst_h.T)
+        # likelihood = self.predict(
+        #     samples[:, self.term_size[language_id] :], [language_id]
+        # )[0]
+        # ll = np.log(likelihood / likelihood.sum())
+        # ll[ll == -np.inf] = 0
+        # inf_loss = np.sum(ll)
 
         # Compute complexity (mutual information)
-        mutual_info_h = MI(pts_h)
+        mutual_info_h = MI(pst_h)
 
         return np.array([mutual_info_h, inf_loss])
 
     def learn_languages(
-        self,
-        n: int,
-        scoring_steps: List[int] = None,
-        language_ids: List[int] = None,
-        save_samples: str = None,
-        seed: int = 42,
-    ) -> Dict[int, List[Tuple[float, float]]]:
+            self,
+            n: int,
+            scoring_steps: List[int] = None,
+            language_ids: List[int] = None,
+            save_samples: str = None,
+            seed: int = 42,
+    ) -> Dict[int, np.ndarray]:
         """Train the SOM on the given data set and number of time steps.
 
         Args:
@@ -365,15 +380,15 @@ class SelfOrganisingMap:
         Returns:
             A list of pairs of model scores with the same size as eval_steps
         """
-        scores = defaultdict(list)
+        scores = {lid: [] for lid in language_ids}
         for lid, data in tqdm(
-            self.term_data.groupby("language"), desc="Learning colours"
+                self.term_data.groupby("language"), desc="Learning colours"
         ):
             if language_ids is not None and lid not in language_ids:
                 continue
             size = self.term_size[lid]
             index_matrix = np.arange(0, size * NUM_CHIPS)
-            pts = self.pst[lid].flatten()
+            pts = self.pts[lid].flatten()
             samples = tuple(
                 np.unravel_index(
                     np.random.choice(index_matrix, n, p=pts), (size, NUM_CHIPS)
@@ -408,9 +423,10 @@ class SelfOrganisingMap:
                         )
                     )
             self.reset_hyperparams()
+            scores[lid] = np.array(scores[lid])
         return scores
 
-    def predict(self, x: np.ndarray = None, language_ids: List[int] = None):
+    def predict_t_s(self, x: np.ndarray = None, language_ids: List[int] = None):
         """Predict conditional term probabilities for each row in x given a colour chip.
         Only the final sem_size features are considered from each row.
 
@@ -437,12 +453,48 @@ class SelfOrganisingMap:
             pt_s_arr.append(pt_s)
         return pt_s_arr
 
+    def predict_s_t(self, x: np.ndarray = None, language_ids: List[int] = None):
+        ps_t_arr = []
+        for lid, _ in self.term_data.groupby("language"):
+            if language_ids is not None and lid not in language_ids:
+                continue
+
+            size = self.term_size[lid]
+            if x is None:
+                x = np.eye(size) * self.a
+
+            m = self.models[lid]
+            diff_x = m[:, :, None, :size] - x[None, None, :]
+            dist_x = np.linalg.norm(diff_x, axis=-1).reshape((-1, len(x)))
+            bmu_idx = np.unravel_index(
+                np.argmin(dist_x, axis=0), (self.size, self.size)
+            )
+            bmu_x = m[bmu_idx]
+            ps_t = bmu_x[:, size:] / bmu_x[:, size:].sum(axis=-1, keepdims=True)
+            ps_t_arr.append(ps_t)
+        return ps_t_arr
+
+
+def get_average_scores(scores: List[Dict[int, np.ndarray]]) -> Dict[int, np.ndarray]:
+    dic = defaultdict(list)
+    for s_dict in scores:
+        for lid, arr in s_dict.items():
+            dic[lid].append(arr)
+
+    ret = {}
+    for lid, arr in dic.items():
+        np_arr = np.array(arr)
+        ret[lid] = np.hstack([np.mean(np_arr, 0), np.std(np_arr, 0)])
+    return ret
+
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run SOM on WCS data")
     parser.add_argument("--seed", type=int, default=42, help="random seed")
     parser.add_argument("--plot", dest="plot", action="store_true", help="plot results")
+    parser.add_argument("--average_k", type=int, default=10, help="The number of learners to "
+                                                                 "average over for the developmental plots.")
     args = parser.parse_args()
 
     # Global parameters
@@ -481,52 +533,63 @@ if __name__ == "__main__":
             "term_weight": [0.3],
             "alpha": [0.1],
             "size": [12],
-            "color_prior": ["capacity"],
+            "color_prior": ["uniform"],
         }
 
     # Number of samples to draw for each language
     sample_range = (
-        list(range(1, 25, 1))
-        + list(range(25, 50, 5))
-        + list(range(50, 100, 10))
-        + list(range(100, 220, 20))
-        + list(range(250, 1000, 50))
-        + list(range(1000, 2100, 100))
-        + list(range(3000, 10001, 1000))
+            list(range(1, 25, 1))
+            + list(range(25, 50, 5))
+            + list(range(50, 100, 10))
+            + list(range(100, 220, 20))
+            + list(range(250, 1000, 50))
+            + list(range(1000, 2100, 100))
+            + list(range(3000, 10001, 1000))
         # + list(range(20000, 100001, 10000))
     )
 
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"]
 
-    lids = list(range(1, 110))
+    # lids = list(range(1, 110))
     # lids = [1, 31, 34, 107]
+    lids = [2]
 
     for som_args in product_dict(**features):
         print(som_args)
-        som = SelfOrganisingMap(**som_args)
-        scores_dict = som.learn_languages(
-            sample_range[-1],
-            scoring_steps=sample_range,
-            language_ids=lids,
-            save_samples=os.path.join("output", "som", str(seed))
-            if save_samples
-            else None,
-            seed=seed,
-        )
+
+        scores = []
+
+        for k in trange(args.average_k):
+            som = SelfOrganisingMap(**som_args)
+            scores_dict = som.learn_languages(
+                sample_range[-1],
+                scoring_steps=sample_range,
+                language_ids=lids,
+                save_samples=os.path.join("output", "som", str(seed))
+                if save_samples
+                else None,
+                seed=seed,
+            )
+            scores.append(scores_dict)
+
+        scores_dict = get_average_scores(scores)
 
         if args.plot:
-            plt.figure()
-            preds = som.predict(language_ids=lids)
+            preds = som.predict_t_s(language_ids=lids)
             for pred in preds:
                 mode_map(pred)
-                plt.show()
 
+            fig = plt.figure()
+
+            # Plot optimal learning trajectory
+
+
+            # Plot averaged learning trajectories
             for lid, scores in scores_dict.items():
-                scores = np.array(scores)
                 plt.quiver(
-                    *scores[:-1].T,
-                    *np.diff(scores, axis=0).T,
+                    *scores[:-1, :2].T,
+                    *np.diff(scores[:, :2], axis=0).T,
                     angles="xy",
                     scale_units="xy",
                     scale=1,
@@ -537,8 +600,15 @@ if __name__ == "__main__":
                 plt.scatter(
                     scores[:, 0], scores[:, 1], s=6, edgecolor="white", linewidth=0.5
                 )
+                # plt.fill_between(scores[:, 0],
+                #                  scores[:, 1] + scores[:, 3] / np.sqrt(args.average_k),
+                #                  scores[:, 1] - scores[:, 3] / np.sqrt(args.average_k),
+                #                  alpha=0.5)
                 plt.xlabel("Complexity; $I(H, C)$ bits")
-                plt.ylabel("Information Loss; Log likelihood")
-                plt.gcf().tight_layout()
+                plt.ylabel("Information Loss; KL-Divergence bits")
 
+                scores = pickle.load(open(f"scores_{lid}.p", "rb"))
+                plt.plot(*list(zip(*[(r, d) for r, d, _ in scores])))
+
+                fig.tight_layout()
                 plt.show()
