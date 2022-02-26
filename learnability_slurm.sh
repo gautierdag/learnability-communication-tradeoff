@@ -1,7 +1,8 @@
 #!/bin/bash
-#SBATCH --mem=2000
-#SBATCH --cpus-per-task=110
-#SBATCH --time=2:00:00
+#SBATCH --job-name=GP
+#SBATCH --mem=2G
+#SBATCH --cpus-per-task=55
+#SBATCH --time=3-12:00:00
 
 set -e # fail fast
 
@@ -13,9 +14,9 @@ echo "Job started at ${dt}"
 # ====================
 # Activate Anaconda environment
 # ====================
-source ~/.bashrc
+source ~/miniconda3/etc/profile.d/conda.sh
 conda activate gp
 
-python -m learnability_frontier.py
+python -u learnability_frontier.py
 
 echo "Job ${SLURM_JOB_ID} is done!"
