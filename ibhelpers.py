@@ -55,7 +55,7 @@ def fit_ib(p_xy, qinit, focalbeta, betas, tol=0.05, verbose=0, divergence=None):
             prevresultsize = resultsize
 
         if verbose:
-            print(str(beta) + ":" + str(resultsize))
+            print(f"{beta}:{resultsize} - r:{result.rate} - d:{result.distortion}")
 
     ind = np.argmin(abs(betas - focalbeta))
     q = qs[ind]
