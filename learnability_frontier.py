@@ -1,5 +1,6 @@
 import os.path
 import pickle
+import sys
 
 import multiprocessing
 import numpy as np
@@ -31,7 +32,7 @@ def fit_optimal_curve(args):
 
 
 if __name__ == '__main__':
-    multiproc = True
+    multiproc = False
     workers = 110
 
     if not os.path.exists("results"):
@@ -46,6 +47,9 @@ if __name__ == '__main__':
 
     if not multiproc:
         for params in items:
+            if len(sys.argv) > 1 and params[0] != int(sys.argv[1]):
+                continue
+            print(f"Fitting Language {params[0]}")
             scores = fit_optimal_curve(params)
             pickle.dump(scores, open(f"results/learnability_scores/{params[0]}.p", "wb"))
     else:
