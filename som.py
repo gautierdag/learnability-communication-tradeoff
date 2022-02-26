@@ -339,31 +339,28 @@ class SelfOrganisingMap:
             wcs_samples, columns=["language", "speaker", "chip", "word"]
         )
 
-    def score(self, samples: np.ndarray, language_id: int, save=None) -> np.ndarray:
-        """Score the current model for information loss and complexity"""
-        pt_s_h = self.predict_t_s(language_ids=[language_id])[0]
+    def score(self, pts: np.ndarray, model: np.ndarray, n_words: int, save=None) -> np.ndarray:
+        """Score the current model for information loss and complexity
+
+        Args:
+            pts: The true data distribution
+            model: The learnt SOM model
+            n_words: The number of colour terms
+            save: If not None, then gives the file to save the calculated probability distribution to
+        """
+        pt_s_h = self.predict_t_s_model(self.distance_matrix, model, n_words)
         if save is not None:
             np.save(save, pt_s_h)
-
         pst_h = pt_s_h * self.ps
 
-        # Compute information loss as KL-divergence from adult model
-        inf_loss = DKL(self.pts[language_id], pst_h.T)
-        # likelihood = self.predict(
-        #     samples[:, self.term_size[language_id] :], [language_id]
-        # )[0]
-        # ll = np.log(likelihood / likelihood.sum())
-        # ll[ll == -np.inf] = 0
-        # inf_loss = np.sum(ll)
-
-        # Compute complexity (mutual information)
+        inf_loss = DKL(pts, pst_h.T)
         mutual_info_h = MI(pst_h)
 
         return np.array([mutual_info_h, inf_loss])
 
     def learn_languages(
             self,
-            n: int,
+            n: int = 1000,
             scoring_steps: List[int] = None,
             language_ids: List[int] = None,
             save_samples: str = None,
@@ -376,11 +373,17 @@ class SelfOrganisingMap:
             scoring_steps: The time steps at which to score the models
             language_ids: The languages to train
             save_samples: The directory to save samples to
+            seed: The seed of the simulation
+            samples: If given, then learn using the given samples.
 
         Returns:
             A list of pairs of model scores with the same size as eval_steps
         """
-        scores = {lid: [] for lid in language_ids}
+        if language_ids is not None:
+            scores = {lid: [] for lid in language_ids}
+        else:
+            scores = {lid: [] for lid in self.models}
+
         for lid, data in tqdm(
                 self.term_data.groupby("language"), desc="Learning colours"
         ):
@@ -388,10 +391,10 @@ class SelfOrganisingMap:
                 continue
             size = self.term_size[lid]
             index_matrix = np.arange(0, size * NUM_CHIPS)
-            pts = self.pts[lid].flatten()
+            pts = self.pts[lid]
             samples = tuple(
                 np.unravel_index(
-                    np.random.choice(index_matrix, n, p=pts), (size, NUM_CHIPS)
+                    np.random.choice(index_matrix, n, p=pts.flatten()), (size, NUM_CHIPS)
                 )
             )
 
@@ -406,25 +409,38 @@ class SelfOrganisingMap:
                     header=False,
                 )
 
-            samples_seen = []
             m = self.models[lid]
-            for i, sample in tqdm(enumerate(zip(*samples)), desc=f"Language {lid}"):
-                x = self.get_features(sample, size)
-                samples_seen.append(x)
-                self.forward(m, x)
-                self.adjust_hyperparams()
-
-                if scoring_steps is not None and i in scoring_steps:
-                    scores[lid].append(
-                        self.score(
-                            np.array(samples_seen),
-                            language_id=lid,
-                            save=f"output/som/{seed}/{lid}/{i}_pt_s.npy",
-                        )
-                    )
-            self.reset_hyperparams()
-            scores[lid] = np.array(scores[lid])
+            language_scores = self.learn_language_from_samples(
+                lid, samples, scoring_steps, size, m, pts, f"output/som/{seed}/{lid}/")
+            scores[lid] = language_scores
         return scores
+
+    def learn_language_from_samples(self,
+                                    language_id: int,
+                                    samples: Tuple[List[int], List[int]] = None,
+                                    scoring_steps: List[int] = None,
+                                    n_words: int = None,
+                                    m: np.ndarray = None,
+                                    pts: np.ndarray = None,
+                                    save_scores: str = None):
+        """ Train the SOM on the given sample set. """
+        scores = []
+        for i, sample in tqdm(enumerate(zip(*samples)), desc=f"Language {language_id}"):
+            x = self.get_features(sample, n_words)
+            self.forward(m, x)
+            self.adjust_hyperparams()
+
+            if scoring_steps is not None and i in scoring_steps:
+                scores.append(
+                    self.score(
+                        pts=pts,
+                        model=m,
+                        n_words=n_words,
+                        save=os.path.join(save_scores, f"{i}_pt_s.npy") if save_scores is not None else None,
+                    )
+                )
+        self.reset_hyperparams()
+        return np.array(scores)
 
     def predict_t_s(self, x: np.ndarray = None, language_ids: List[int] = None):
         """Predict conditional term probabilities for each row in x given a colour chip.
@@ -437,21 +453,24 @@ class SelfOrganisingMap:
         if x is None:
             x = self.distance_matrix
 
-        pt_s_arr = []
+        pt_s_arr = {}
         for lid, _ in self.term_data.groupby("language"):
             if language_ids is not None and lid not in language_ids:
                 continue
             size = self.term_size[lid]
             m = self.models[lid]
-            diff_x = m[:, :, None, -NUM_CHIPS:] - x[None, None, :]
-            dist_x = np.linalg.norm(diff_x, axis=-1).reshape((-1, len(x)))
-            bmu_idx = np.unravel_index(
-                np.argmin(dist_x, axis=0), (self.size, self.size)
-            )
-            bmu_x = m[bmu_idx]
-            pt_s = bmu_x[:, :size] / bmu_x[:, :size].sum(axis=-1, keepdims=True)
-            pt_s_arr.append(pt_s)
+            pt_s_arr[lid] = self.predict_t_s_model(x, m, size)
         return pt_s_arr
+
+    def predict_t_s_model(self, x: np.ndarray, m: np.ndarray, n_words: int):
+        diff_x = m[:, :, None, -NUM_CHIPS:] - x[None, None, :]
+        dist_x = np.linalg.norm(diff_x, axis=-1).reshape((-1, len(x)))
+        bmu_idx = np.unravel_index(
+            np.argmin(dist_x, axis=0), (self.size, self.size)
+        )
+        bmu_x = m[bmu_idx]
+        pt_s = bmu_x[:, :n_words] / bmu_x[:, :n_words].sum(axis=-1, keepdims=True)
+        return pt_s
 
     def predict_s_t(self, x: np.ndarray = None, language_ids: List[int] = None):
         ps_t_arr = []
@@ -464,15 +483,18 @@ class SelfOrganisingMap:
                 x = np.eye(size) * self.a
 
             m = self.models[lid]
-            diff_x = m[:, :, None, :size] - x[None, None, :]
-            dist_x = np.linalg.norm(diff_x, axis=-1).reshape((-1, len(x)))
-            bmu_idx = np.unravel_index(
-                np.argmin(dist_x, axis=0), (self.size, self.size)
-            )
-            bmu_x = m[bmu_idx]
-            ps_t = bmu_x[:, size:] / bmu_x[:, size:].sum(axis=-1, keepdims=True)
-            ps_t_arr.append(ps_t)
+            ps_t_arr[lid] = self.predict_s_t_model(x, m, size)
         return ps_t_arr
+
+    def predict_s_t_model(self, x: np.ndarray, m: np.ndarray, n_words: int):
+        diff_x = m[:, :, None, :n_words] - x[None, None, :]
+        dist_x = np.linalg.norm(diff_x, axis=-1).reshape((-1, len(x)))
+        bmu_idx = np.unravel_index(
+            np.argmin(dist_x, axis=0), (self.size, self.size)
+        )
+        bmu_x = m[bmu_idx]
+        ps_t = bmu_x[:, n_words:] / bmu_x[:, n_words:].sum(axis=-1, keepdims=True)
+        return ps_t
 
 
 def get_average_scores(scores: List[Dict[int, np.ndarray]]) -> Dict[int, np.ndarray]:
@@ -493,7 +515,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run SOM on WCS data")
     parser.add_argument("--seed", type=int, default=42, help="random seed")
     parser.add_argument("--plot", dest="plot", action="store_true", help="plot results")
-    parser.add_argument("--average_k", type=int, default=10, help="The number of learners to "
+    parser.add_argument("--average_k", type=int, default=5, help="The number of learners to "
                                                                  "average over for the developmental plots.")
     args = parser.parse_args()
 
@@ -544,19 +566,37 @@ if __name__ == "__main__":
             + list(range(100, 220, 20))
             + list(range(250, 1000, 50))
             + list(range(1000, 2100, 100))
-            + list(range(3000, 10001, 1000))
+        # + list(range(3000, 10001, 1000))
         # + list(range(20000, 100001, 10000))
     )
 
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"]
 
+    lang_strs = pd.read_csv("wcs/lang.txt", sep="\t", usecols=[0, 1],
+                            header=None, index_col=0, names=["id", "language"])
+
     # lids = list(range(1, 110))
     # lids = [1, 31, 34, 107]
-    lids = [2]
+    lids = [2, 32, 35, 108]
 
     for som_args in product_dict(**features):
         print(som_args)
+
+        # Plot optimal learning curves against one another
+        som = SelfOrganisingMap(**som_args)
+        fig = plt.figure()
+        for lid in lids:
+            scores = pickle.load(open(f"frontier/learnability_languages/{lid}.p", "rb"))
+            plt.plot(*list(zip(*[(r, d) for r, d, _ in scores])),
+                     label=f"{lang_strs.loc[lid, 'language']} ({som.term_size[lid]})")
+        plt.legend()
+        plt.title("Optimal learning curves")
+        plt.xlabel("Complexity; $I(H, C)$ bits")
+        plt.ylabel("Information Loss; KL-Divergence bits")
+        fig.tight_layout()
+        fig.savefig(f"output/som/optimal_curves.pdf")
+        plt.show()
 
         scores = []
 
@@ -576,14 +616,11 @@ if __name__ == "__main__":
         scores_dict = get_average_scores(scores)
 
         if args.plot:
-            preds = som.predict_t_s(language_ids=lids)
-            for pred in preds:
-                mode_map(pred)
+            # preds = som.predict_t_s(language_ids=lids)
+            # for pred in preds:
+            #     mode_map(pred)
 
             fig = plt.figure()
-
-            # Plot optimal learning trajectory
-
 
             # Plot averaged learning trajectories
             for lid, scores in scores_dict.items():
@@ -604,11 +641,13 @@ if __name__ == "__main__":
                 #                  scores[:, 1] + scores[:, 3] / np.sqrt(args.average_k),
                 #                  scores[:, 1] - scores[:, 3] / np.sqrt(args.average_k),
                 #                  alpha=0.5)
-                plt.xlabel("Complexity; $I(H, C)$ bits")
+                plt.xlabel("Complexity; $I(W, C)$ bits")
                 plt.ylabel("Information Loss; KL-Divergence bits")
+                plt.title(lang_strs.loc[lid, "language"])
 
-                scores = pickle.load(open(f"scores_{lid}.p", "rb"))
+                scores = pickle.load(open(f"frontier/learnability_languages/{lid}.p", "rb"))
                 plt.plot(*list(zip(*[(r, d) for r, d, _ in scores])))
 
                 fig.tight_layout()
+                fig.savefig(f"output/som/{lid}.pdf")
                 plt.show()

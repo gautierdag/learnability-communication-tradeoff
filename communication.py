@@ -1,9 +1,17 @@
+import os
+import pickle
 from typing import Tuple
 import pandas as pd
 import numpy as np
+from matplotlib import pyplot as plt
 from numpy.typing import ArrayLike
 from scipy.stats import multivariate_normal
 import glob
+
+import tqdm
+
+from learnability_frontier import fit_optimal_curve
+from som import product_dict, SelfOrganisingMap
 
 NUM_MEANINGS = 330
 
@@ -153,7 +161,7 @@ class LanguageSampler:
             self.prob_matrix = np.load(f)
         self.num_words = self.prob_matrix.shape[1]
         assert self.prob_matrix.shape[0] == 330, "q matrix must be 330xW"
-        assert self.prob_matrix.sum() == 1, "q matrix sum must = 1"
+        assert np.isclose(self.prob_matrix.sum(), 1), "q matrix sum must = 1"
 
     def sample_indices(self, n: int) -> Tuple[ArrayLike, ArrayLike]:
         # Create a flat copy of the 2D joint distribution
@@ -172,25 +180,101 @@ class LanguageSampler:
 
 
 if __name__ == "__main__":
+    seed = 42
+    avg_k = 1
+    np.random.seed(seed)
 
-    files = glob.glob("frontier/q_matrices/*")
+    files = glob.glob(os.path.join("frontier", "q_matrices", "*"))
 
     N = 1000  # number of samples to sample from frontier language
-    betas = []
+    betas = {}
+    num_words = {}
     rates = []
     distortions = []
-    for f in files:
-        beta, rate, distortion = f.split("/")[-1].split("_")
+    scores = {}
+
+    sample_range = (
+            list(range(1, 25, 1))
+            + list(range(25, 50, 5))
+            + list(range(50, 100, 10))
+            + list(range(100, 220, 20))
+            + list(range(250, 1000, 50))
+            + list(range(1000, 2100, 100))
+            # + list(range(3000, 10001, 1000))
+            # + list(range(20000, 100001, 10000))
+    )
+
+    features = {
+        "features": ["perc"],
+        "sampling": ["corpus"],
+        "sigma": [5.0],
+        "term_weight": [0.3],
+        "alpha": [0.1],
+        "size": [12],
+        "color_prior": ["uniform"],
+    }
+
+    prev_num_words = 0
+    for i, f in enumerate(files):
+        beta, rate, distortion = f.split(os.sep)[-1].split("_")
         distortion = distortion.split(".npy")[0]
         beta, rate, distortion = float(beta), float(rate), float(distortion)
-        betas.append(beta)
+        betas[i] = beta
         rates.append(rate)
         distortions.append(distortion)
         sampler = LanguageSampler(f)
+        num_words[i] = sampler.num_words
         # @NOTE: sampler.num_words will tell you how many words are in the language
 
-        # c and w are the chip and word indices as arrays of size N
-        c, w = sampler.sample_indices(N)
+        if sampler.num_words < 2 or sampler.num_words == prev_num_words or len(scores) > 5:
+            continue
+        prev_num_words = sampler.num_words
 
-        # @TODO: use these samples to learn SOM and plot/save results somewhere
-        raise NotImplementedError()
+        # c and w are the chip and word indices as arrays of size N
+        c, w = sampler.sample_indices(sample_range[-1])
+
+        prop_cycle = plt.rcParams["axes.prop_cycle"]
+        colors = prop_cycle.by_key()["color"]
+
+        for args in product_dict(**features):
+            for k in range(avg_k):
+                som = SelfOrganisingMap(**args)
+                m = np.zeros((som.size, som.size, sampler.num_words + som.distance_matrix.shape[0]))
+                score = som.learn_language_from_samples(i, (w, c), sample_range,
+                                                        sampler.num_words, m, sampler.prob_matrix.T)
+                if i not in scores:
+                    scores[i] = score
+                else:
+                    scores[i] += score
+            scores[i] /= avg_k
+
+        path = f"frontier/learnability_communicative/{i}.p"
+        if not os.path.exists(path):
+            s = fit_optimal_curve((i, sampler.prob_matrix.T, path))
+        break
+
+    for i, s in scores.items():
+        plt.quiver(
+            *s[:-1, :2].T,
+            *np.diff(s[:, :2], axis=0).T,
+            angles="xy",
+            scale_units="xy",
+            scale=1,
+            width=0.005,
+            headwidth=2,
+            color=colors[i % len(colors)]
+        )
+        plt.scatter(
+            s[:, 0], s[:, 1], s=6, edgecolor="white", linewidth=0.5
+        )
+        plt.xlabel("Complexity; $I(H, C)$ bits")
+        plt.ylabel("Information Loss; KL-Divergence bits")
+        plt.title("Learning curve for communicatively optimal system\n" + rf"with $\beta=${betas[i]:.4f}; $K=${num_words[i]}")
+
+        path = f"frontier/learnability_communicative/{i}.p"
+        s = pickle.load(open(path, "rb"))
+        plt.plot(*list(zip(*[(r, d) for r, d, _ in s])))
+
+        plt.gcf().tight_layout()
+        plt.savefig(f"output/som/ce_opt_{num_words[i]}.pdf")
+        plt.show()

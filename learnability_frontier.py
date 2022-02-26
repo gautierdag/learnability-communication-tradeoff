@@ -24,10 +24,13 @@ def fit_optimal_curve(args):
 
     q0 = np.eye(q.shape[1])
     focalbeta = 1
-    betas = np.array([2 ** x for x in np.arange(4, -2, -0.1)])
+    betas = np.array([2 ** x for x in np.arange(4, -2, -0.5)])
     scores = fit_ib(q, q0, focalbeta, betas, verbose=1, divergence="entropy")[2]
 
-    pickle.dump(scores, open(f"results/learnability_scores/{lid}.p", "wb"))
+    if len(args) < 3:
+        pickle.dump(scores, open(f"results/learnability_scores/{lid}.p", "wb"))
+    else:
+        pickle.dump(scores, open(args[2], "wb"))
     return scores
 
 
