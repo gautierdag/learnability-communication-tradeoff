@@ -7,11 +7,10 @@ from matplotlib import pyplot as plt
 from numpy.typing import ArrayLike
 from scipy.stats import multivariate_normal
 import glob
-
-import tqdm
+import multiprocessing
 
 from learnability_frontier import fit_optimal_curve
-from som import product_dict, SelfOrganisingMap
+from som import SelfOrganisingMap
 
 NUM_MEANINGS = 330
 
@@ -53,8 +52,8 @@ class MutualInfoCalculator(object):
             total_chips_per_word="count"
         )
         p_chip_word_language = (
-            per_word_count_df["individual_count_per_chip_per_word"]
-            / total_chip_count_df["total_chips_per_word"]
+                per_word_count_df["individual_count_per_chip_per_word"]
+                / total_chip_count_df["total_chips_per_word"]
         )
 
         # frequentist probability of a word given chip and language
@@ -65,8 +64,8 @@ class MutualInfoCalculator(object):
             total_words_per_chip="count"
         )
         p_word_chip_language = (
-            per_chip_count_df["individual_count_per_word_per_chip"]
-            / total_word_count_df["total_words_per_chip"]
+                per_chip_count_df["individual_count_per_word_per_chip"]
+                / total_word_count_df["total_words_per_chip"]
         )
 
         p_xs = []
@@ -81,7 +80,7 @@ class MutualInfoCalculator(object):
             try:
                 # Find the most common word for each chip and assign chip to that word\n
                 for chip_num, word in (
-                    p_word_chip_language[language].groupby(level=0).idxmax().values
+                        p_word_chip_language[language].groupby(level=0).idxmax().values
                 ):
                     chip_to_word[chip_num - 1] = word_to_index[word]
             except TypeError as e:
@@ -91,9 +90,9 @@ class MutualInfoCalculator(object):
             # Find the frequency of that color in data, then split it equally across all the chips assigned to it\n
             word_frequencies = (
                 p_chip_word_language[language]
-                .reset_index()
-                .word.apply(lambda x: word_to_index[x])
-                .value_counts()
+                    .reset_index()
+                    .word.apply(lambda x: word_to_index[x])
+                    .value_counts()
             )
 
             p_x = np.zeros(NUM_MEANINGS)
@@ -134,7 +133,7 @@ class MutualInfoCalculator(object):
         return p_xGy
 
     def get_MI(
-        self, flan: str = "wcs/term.txt", fclab: str = "wcs/cnum-vhcm-lab-new.txt"
+            self, flan: str = "wcs/term.txt", fclab: str = "wcs/cnum-vhcm-lab-new.txt"
     ) -> float:
         p_x = self.get_px(flan)
         p_xGy = self.get_pxGy(fclab)
@@ -179,9 +178,20 @@ class LanguageSampler:
         return chip_indices, word_indices
 
 
+def func(args):
+    sampler_, sample_range_, nw, pts = args
+    c_, w_ = sampler_.sample_indices(sample_range_[-1])
+    som_ = SelfOrganisingMap()
+    m_ = np.zeros((som_.size, som_.size, nw + som_.distance_matrix.shape[0]))
+    score_ = som_.learn_language_from_samples(None, (w_, c_), sample_range_,
+                                              nw, m_, pts.T)
+    return score_
+
+
 if __name__ == "__main__":
     seed = 42
-    avg_k = 10
+    average_k = 1
+    workers = 8
     np.random.seed(seed)
 
     files = glob.glob(os.path.join("frontier", "q_matrices", "*"))
@@ -200,19 +210,12 @@ if __name__ == "__main__":
             + list(range(100, 220, 20))
             + list(range(250, 1000, 50))
             + list(range(1000, 2100, 100))
-            # + list(range(3000, 10001, 1000))
-            # + list(range(20000, 100001, 10000))
+            + list(range(3000, 10001, 1000))
+            + list(range(20000, 100001, 10000))
     )
 
-    features = {
-        "features": ["perc"],
-        "sampling": ["corpus"],
-        "sigma": [5.0],
-        "term_weight": [0.3],
-        "alpha": [0.1],
-        "size": [12],
-        "color_prior": ["uniform"],
-    }
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
 
     prev_num_words = 0
     for i, f in enumerate(files):
@@ -226,33 +229,45 @@ if __name__ == "__main__":
         num_words[i] = sampler.num_words
         # @NOTE: sampler.num_words will tell you how many words are in the language
 
-        if sampler.num_words < 2 or sampler.num_words == prev_num_words or len(scores) > 5:
+        if sampler.num_words < 30 or sampler.num_words == prev_num_words or len(scores) > 5:
             continue
         prev_num_words = sampler.num_words
 
-        # c and w are the chip and word indices as arrays of size N
-        c, w = sampler.sample_indices(sample_range[-1])
+        som = SelfOrganisingMap()
 
-        prop_cycle = plt.rcParams["axes.prop_cycle"]
-        colors = prop_cycle.by_key()["color"]
+        sampling_scores = []
+        if workers is not None:
+            with multiprocessing.Pool(processes=workers) as p:
+                sampling_scores = p.map(func, [(sampler, sample_range, sampler.num_words, sampler.prob_matrix)
+                                                for j in range(average_k)])
+        else:
+            for k in range(average_k):
+                # c and w are the chip and word indices as arrays of size N
+                c, w = sampler.sample_indices(sample_range[-1])
 
-        for args in product_dict(**features):
-            for k in range(avg_k):
-                som = SelfOrganisingMap(**args)
                 m = np.zeros((som.size, som.size, sampler.num_words + som.distance_matrix.shape[0]))
-                score = som.learn_language_from_samples(i, (w, c), sample_range,
-                                                        sampler.num_words, m, sampler.prob_matrix.T)
-                if i not in scores:
-                    scores[i] = score
-                else:
-                    scores[i] += score
-            scores[i] /= avg_k
+                sampling_score = som.learn_language_from_samples(i, (w, c), sample_range,
+                                                                 sampler.num_words, m, sampler.prob_matrix.T)
+        for score in sampling_scores:
+            if i not in scores:
+                scores[i] = score
+            else:
+                scores[i] += score
+        scores[i] /= average_k
 
-        path = f"frontier/learnability_communicative/{i}.p"
+        path = f"frontier/learnability_communicative/"
         if not os.path.exists(path):
-            s = fit_optimal_curve((i, sampler.prob_matrix.T, path))
+            os.mkdir(path)
+        if not os.path.exists(os.path.join(path, f"{i}.p")):
+            pt_s = sampler.prob_matrix / sampler.prob_matrix.sum(1, keepdims=True)
+            ps = (pt_s * som.ps_universal).sum(1)
+            s = fit_optimal_curve(i, ps, 0.33, path)
 
-    for i, s in scores.items():
+        break
+
+    pickle.dump(scores, open(f"output/som/{seed}/ce_scores_dict.p", "wb"))
+
+    for j, s in scores.items():
         plt.quiver(
             *s[:-1, :2].T,
             *np.diff(s[:, :2], axis=0).T,
@@ -261,18 +276,19 @@ if __name__ == "__main__":
             scale=1,
             width=0.005,
             headwidth=2,
-            color=colors[i % len(colors)]
+            color=colors[j % len(colors)]
         )
         plt.scatter(
             s[:, 0], s[:, 1], s=6, edgecolor="white", linewidth=0.5
         )
         plt.xlabel("Complexity; $I(H, C)$ bits")
         plt.ylabel("Information Loss; KL-Divergence bits")
-        plt.title("Learning curve for communicatively optimal system\n" + rf"with $\beta=${betas[i]:.4f}; $K=${num_words[i]}")
+        plt.title("Learning curve for communicatively optimal system\n" +
+                  rf"with $\beta=${betas[j]:.4f}; $K=${num_words[j]}")
 
         path = f"frontier/learnability_communicative/{i}.p"
         s = pickle.load(open(path, "rb"))
-        plt.plot(*list(zip(*[(r, d) for r, d, _ in s])))
+        plt.plot(s[0], s[1])
 
         plt.gcf().tight_layout()
         plt.savefig(f"output/som/ce_opt_{num_words[i]}.pdf")

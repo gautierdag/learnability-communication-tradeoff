@@ -122,9 +122,11 @@ class SelfOrganisingMap:
         self.get_term_distribution()
 
         # Color prior (semantic space prior)
-        self.ps = None
-        self.ps_universal = None
+        self.ps = {}
         self.calculate_color_prior()
+        ps = np.array([p for lid, p in self.ps.items()])
+        ps = ps.sum(0) / len(ps)
+        self.ps_universal = ps
 
         # Map coordinate array for calculating d_map
         map_idx = np.arange(0, self.size ** 2).reshape((self.size, self.size))
@@ -252,9 +254,6 @@ class SelfOrganisingMap:
         elif self.color_prior == "capacity":
             if os.path.exists("ps.p"):
                 self.ps = pickle.load(open("ps.p", "rb"))
-                ps = np.array([p for lid, p in self.ps.items()])
-                ps = ps.sum(0) / len(ps)
-                self.ps_universal = ps
                 return
 
             ps = {}
@@ -418,7 +417,7 @@ class SelfOrganisingMap:
         return scores
 
     def learn_language_from_samples(self,
-                                    language_id: int,
+                                    language_id: int = None,
                                     samples: Tuple[List[int], List[int]] = None,
                                     scoring_steps: List[int] = None,
                                     n_words: int = None,
@@ -427,7 +426,10 @@ class SelfOrganisingMap:
                                     save_scores: str = None):
         """ Train the SOM on the given sample set. """
         scores = []
-        ps_l = (self.pt_s[language_id] * self.ps_universal).sum(1, keepdims=True)
+        if language_id is not None:
+            ps_l = (self.pt_s[language_id] * self.ps_universal).sum(1, keepdims=True)
+        else:
+            ps_l = self.ps_universal
         for i, sample in tqdm(enumerate(zip(*samples)), desc=f"Language {language_id}"):
             x = self.get_features(sample, n_words)
             self.forward(m, x)
