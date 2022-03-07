@@ -102,14 +102,12 @@ def fit_optimal_curve(language_id: int, ps: np.ndarray, a: float):
     betas = np.array([2 ** x for x in np.arange(3, 0, -0.01)])
     qss, scores = rev_deterministic_annealing_IB(ps, q, betas, q0, verbose=True)
 
-    plt.plot(scores[0], scores[1], label=alpha)
-
-    # pickle.dump(scores, open(f"frontier/learnability_languages/{language_id}.p", "wb"))
+    pickle.dump(scores, open(f"frontier/learnability_languages/{language_id}.p", "wb"))
     return scores
 
 
 if __name__ == '__main__':
-    alpha = 0.3  # Uniform noise level
+    alpha = 0.33  # Uniform noise level
 
     if not os.path.exists("frontier"):
         os.mkdir("frontier")
@@ -126,7 +124,4 @@ if __name__ == '__main__':
             continue
         print(f"Fitting Language {lid}")
         ps_l = (pt_s * ps).sum(1)
-        for alpha in np.arange(0.1, 1.0, 0.1):
-            scores = fit_optimal_curve(lid, ps_l, alpha)
-        plt.legend()
-        plt.show()
+        fit_optimal_curve(lid, ps_l, alpha)

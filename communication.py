@@ -181,7 +181,7 @@ class LanguageSampler:
 
 if __name__ == "__main__":
     seed = 42
-    avg_k = 1
+    avg_k = 10
     np.random.seed(seed)
 
     files = glob.glob(os.path.join("frontier", "q_matrices", "*"))
@@ -251,7 +251,6 @@ if __name__ == "__main__":
         path = f"frontier/learnability_communicative/{i}.p"
         if not os.path.exists(path):
             s = fit_optimal_curve((i, sampler.prob_matrix.T, path))
-        break
 
     for i, s in scores.items():
         plt.quiver(

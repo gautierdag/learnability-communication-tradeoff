@@ -12,8 +12,6 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 from tqdm import tqdm, trange
 
-from ck_blahut_arimoto import ck_blahut_arimoto_ib
-from noga.figures import mode_map
 from noga.tools import MI, DKL
 
 NUM_CHIPS = 330
@@ -406,8 +404,6 @@ class SelfOrganisingMap:
 
             if save_samples is not None:
                 path = os.path.join(os.path.join(save_samples, str(lid)))
-                if not os.path.exists(path):
-                    os.mkdir(path)
                 self.get_wcs_form(samples, lid).to_csv(
                     os.path.join(path, f"{n}_samples.csv"),
                     sep="\t",
@@ -536,23 +532,24 @@ def func(args):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description="Run SOM on WCS data")
     parser.add_argument("--seed", type=int, default=42, help="random seed")
-    parser.add_argument("--plot", dest="plot", action="store_true", help="plot results")
     parser.add_argument("--average_k", type=int, default=5, help="The number of learners to "
                                                                  "average over for the developmental plots.")
     parser.add_argument("--workers", type=int, default=None, help="If given, then use multiprocessing with "
                                                                   "given number of workers.")
+
     args = parser.parse_args()
 
     # Global parameters
     seed = args.seed
-    save_xling = (
-        True  # Whether to save the cross-linguistic feature space after calculation
-    )
+    save_xling = True  # Whether to save the cross-linguistic feature space
     grid_search = False
-    save_samples = True
+    save_samples = False
+
+    # lids = list(range(1, 110))
+    lids = [2, 32, 35, 108]
+    # lids = [2]
 
     np.seterr(divide="ignore")
     np.random.seed(seed)
@@ -563,6 +560,9 @@ if __name__ == "__main__":
         os.mkdir("output/som")
     if not os.path.exists(f"output/som/{seed}"):
         os.mkdir(f"output/som/{seed}")
+    for lid in lids:
+        if not os.path.exists(f"output/som/{seed}/{lid}"):
+            os.mkdir(f"output/som/{seed}/{lid}")
 
     if grid_search:
         features = {
@@ -597,35 +597,11 @@ if __name__ == "__main__":
             + list(range(20000, 100001, 10000))
     )
 
-    prop_cycle = plt.rcParams["axes.prop_cycle"]
-    colors = prop_cycle.by_key()["color"]
-
-    lang_strs = pd.read_csv("wcs/lang.txt", sep="\t", usecols=[0, 1],
-                            header=None, index_col=0, names=["id", "language"])
-
-    # lids = list(range(1, 110))
-    lids = [32]
-    # lids = [2, 32, 35, 108]
-
     for som_args in product_dict(**features):
         print(som_args)
 
         # Plot optimal learning curves against one another
         som = SelfOrganisingMap(**som_args)
-
-        # fig = plt.figure()
-        # for lid in lids:
-        #     scores = pickle.load(open(f"frontier/learnability_languages/{lid}.p", "rb"))
-        #     plt.plot(*list(zip(*[(r, d) for r, d, _ in scores])),
-        #              label=f"{lang_strs.loc[lid, 'language']} ({som.term_size[lid]})")
-        #
-        # plt.legend()
-        # plt.title("Optimal learning curves")
-        # plt.xlabel("Complexity; $I(H, C)$ bits")
-        # plt.ylabel("Information Loss; KL-Divergence bits")
-        # fig.tight_layout()
-        # fig.savefig(f"output/som/optimal_curves.pdf")
-        # plt.show()
 
         scores = []
 
@@ -648,40 +624,4 @@ if __name__ == "__main__":
                 scores.append(scores_dict)
 
         scores_dict = get_average_scores(scores)
-
-        if args.plot:
-            # preds = som.predict_t_s(language_ids=lids)
-            # for pred in preds:
-            #     mode_map(pred)
-
-            fig = plt.figure()
-
-            # Plot averaged learning trajectories
-            for lid, scores in scores_dict.items():
-                plt.quiver(
-                    *scores[:-1, :2].T,
-                    *np.diff(scores[:, :2], axis=0).T,
-                    angles="xy",
-                    scale_units="xy",
-                    scale=1,
-                    width=0.005,
-                    headwidth=2,
-                    color=colors[lid % len(colors)],
-                )
-                plt.scatter(
-                    scores[:, 0], scores[:, 1], s=6, edgecolor="white", linewidth=0.5
-                )
-                # plt.fill_between(scores[:, 0],
-                #                  scores[:, 1] + scores[:, 3] / np.sqrt(args.average_k),
-                #                  scores[:, 1] - scores[:, 3] / np.sqrt(args.average_k),
-                #                  alpha=0.5)
-                plt.xlabel("Complexity; $I(W, C)$ bits")
-                plt.ylabel("Information Loss; KL-Divergence bits")
-                plt.title(lang_strs.loc[lid, "language"])
-
-                scores = pickle.load(open(f"frontier/learnability_languages/{lid}.p", "rb"))
-                plt.plot(scores[0], scores[1])
-
-                fig.tight_layout()
-                # fig.savefig(f"output/som/{lid}.pdf")
-                plt.show()
+        pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))
