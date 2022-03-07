@@ -8,7 +8,7 @@ from noga.figures import mode_map
 from som import SelfOrganisingMap
 
 animate = True
-lids = [2]  # range(1, 111)
+lids = [2, 32, 35, 108]  # range(1, 111)
 seed = 42
 sample_range = (
         list(range(1, 25, 1))
@@ -28,11 +28,11 @@ colors = prop_cycle.by_key()["color"]
 lang_strs = pd.read_csv("wcs/lang.txt", sep="\t", usecols=[0, 1],
                         header=None, index_col=0, names=["id", "language"])
 
+# Plot frontiers against each other
 fig = plt.figure()
 for lid in lids:
     scores = pickle.load(open(f"frontier/learnability_languages/{lid}.p", "rb"))
     plt.plot(scores[0], scores[1], label=f"{lang_strs.loc[lid, 'language']} ({som.term_size[lid]})")
-
 plt.legend()
 plt.title("Optimal learning curves")
 plt.xlabel("Complexity; $I(H, C)$ bits")
@@ -67,7 +67,7 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
         ax.scatter(
             X, Y, s=6, edgecolor="white", linewidth=0.5
         )
-        fig.savefig(f"output/som/{lid}/learning_traj.pdf")
+        fig.savefig(f"output/som/{seed}/{lid}/learning_traj.pdf")
     else:
         artists = []
         for j, _ in enumerate(sample_range):

@@ -600,9 +600,6 @@ if __name__ == "__main__":
     for som_args in product_dict(**features):
         print(som_args)
 
-        # Plot optimal learning curves against one another
-        som = SelfOrganisingMap(**som_args)
-
         scores = []
 
         if args.workers is not None:
