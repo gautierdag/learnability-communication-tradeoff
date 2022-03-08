@@ -2,6 +2,7 @@
 .vscode
 noga/models/
 output/
+animation
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -134,3 +135,6 @@ dmypy.json
 .pyre/
 
 .idea*
+efficiency_plots/
+
+plots/
