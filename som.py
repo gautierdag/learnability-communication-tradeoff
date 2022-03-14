@@ -4,6 +4,7 @@ import pickle
 import argparse
 import multiprocessing
 from collections import defaultdict
+from bidict import bidict
 from typing import Tuple, List, Dict, Union
 
 import numpy as np
@@ -11,6 +12,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 from tqdm import tqdm, trange
+
 
 from noga.tools import MI, DKL
 
@@ -113,7 +115,7 @@ class SelfOrganisingMap:
         }
 
         # Frequentist sampling distribution
-        self.word_map = defaultdict(dict)
+        self.word_map = defaultdict(bidict)
         self.pts = None
         self.get_sampling_distribution()
 
@@ -502,7 +504,6 @@ class SelfOrganisingMap:
         ps_t = bmu_x[:, n_words:] / bmu_x[:, n_words:].sum(axis=-1, keepdims=True)
         return ps_t
 
-
 def get_average_scores(scores: List[Dict[int, np.ndarray]]) -> Dict[int, np.ndarray]:
     dic = defaultdict(list)
     for s_dict in scores:
@@ -532,6 +533,7 @@ def func(args):
         seed=seed_,
     )
 
+from convergence import evaluate_convergence_model
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run SOM on WCS data")
@@ -620,6 +622,7 @@ if __name__ == "__main__":
                     else None,
                     seed=seed,
                 )
+                # evaluate_convergence_model(som, lids) # this way you can do it on the fly in training/use it for grid search if needed
                 scores.append(scores_dict)
 
         scores_dict = get_average_scores(scores)
