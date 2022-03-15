@@ -9,10 +9,7 @@ from typing import Tuple, List, Dict, Union
 
 import numpy as np
 import pandas as pd
-import seaborn as sns
-from matplotlib import pyplot as plt
 from tqdm import tqdm, trange
-
 
 from noga.tools import MI, DKL
 
@@ -189,7 +186,7 @@ class SelfOrganisingMap:
 
     def get_distance_matrix(self) -> np.ndarray:
         """Calculate the relative distance among the semantic features to use as input features."""
-        data = self.sem_data.to_numpy()
+        data = self.sem_data.to_numpy() if self.features == "perc" else self.sem_data
         dist = np.zeros((NUM_CHIPS, NUM_CHIPS))
         for i, row in enumerate(data):
             for j, col in enumerate(data[i:], i):
@@ -298,7 +295,7 @@ class SelfOrganisingMap:
         """Method to iteratively change the hyper-parameters of the SOM."""
         self.alpha += 0
         self.a += 0
-        self.sigma = max(0.001, self.sigma - 0.1)
+        self.sigma = max(0.001, self.sigma - 0.01)
 
     def reset_hyperparams(self):
         """Reset hyper-parameters to their original values."""
@@ -432,7 +429,7 @@ class SelfOrganisingMap:
             ps_l = (self.pt_s[language_id] * self.ps_universal).sum(1, keepdims=True)
         else:
             ps_l = self.ps_universal
-        for i, sample in tqdm(enumerate(zip(*samples)), desc=f"Language {language_id}"):
+        for i, sample in tqdm(enumerate(zip(*samples), 1), desc=f"Language {language_id}"):
             x = self.get_features(sample, n_words)
             self.forward(m, x)
             self.adjust_hyperparams()
@@ -504,6 +501,7 @@ class SelfOrganisingMap:
         ps_t = bmu_x[:, n_words:] / bmu_x[:, n_words:].sum(axis=-1, keepdims=True)
         return ps_t
 
+
 def get_average_scores(scores: List[Dict[int, np.ndarray]]) -> Dict[int, np.ndarray]:
     dic = defaultdict(list)
     for s_dict in scores:
@@ -517,13 +515,22 @@ def get_average_scores(scores: List[Dict[int, np.ndarray]]) -> Dict[int, np.ndar
     return ret
 
 
+def get_average_evaluation(models: List[SelfOrganisingMap],
+                           language_ids: List[int] = None):
+    accs = []
+    for model in models:
+        acc = evaluate_convergence_model(model, language_ids=language_ids)
+        accs.append(acc)
+    return get_average_scores(accs)
+
+
 def func(args):
     som_ = SelfOrganisingMap(**args[0])
     seed_ = args[1]
     sample_range_ = args[2]
     lids_ = args[3]
     save_samples_ = False
-    return som_.learn_languages(
+    scores_ = som_.learn_languages(
         sample_range_[-1],
         scoring_steps=sample_range_,
         language_ids=lids_,
@@ -532,8 +539,8 @@ def func(args):
         else None,
         seed=seed_,
     )
+    return scores_, som_
 
-from convergence import evaluate_convergence_model
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run SOM on WCS data")
@@ -549,6 +556,7 @@ if __name__ == "__main__":
     seed = args.seed
     save_xling = True  # Whether to save the cross-linguistic feature space
     grid_search = False
+    save_scores = False
     save_samples = False
 
     # lids = list(range(1, 110))
@@ -568,15 +576,16 @@ if __name__ == "__main__":
         if not os.path.exists(f"output/som/{seed}/{lid}"):
             os.mkdir(f"output/som/{seed}/{lid}")
 
+    grid_search_results = {}
     if grid_search:
         features = {
             "features": ["xling", "perc"],
             "sampling": ["corpus", "uniform"],
-            "sigma": [5.0],
+            # "sigma": [5.0],
             "term_weight": [0.1, 0.3, 0.5],
             "alpha": [0.1, 0.3, 0.5],
             "size": {7, 10, 12},
-            "color_prior": ["capacity", "uniform"],
+            # "color_prior": ["capacity"],
         }
     else:
         features = {
@@ -591,25 +600,29 @@ if __name__ == "__main__":
 
     # Number of samples to draw for each language
     sample_range = (
-            list(range(1, 25, 1))
-            + list(range(25, 50, 5))
-            + list(range(50, 100, 10))
-            + list(range(100, 220, 20))
-            + list(range(250, 1000, 50))
-            + list(range(1000, 2100, 100))
-            + list(range(3000, 10001, 1000))
-            + list(range(20000, 100001, 10000))
+        list(range(1, 25, 1))
+        + list(range(25, 50, 5))
+        + list(range(50, 100, 10))
+        + list(range(100, 220, 20))
+        + list(range(250, 1000, 50))
+        + list(range(1000, 2100, 100))
+        + list(range(3000, 10001, 1000))
+        + list(range(20000, 100001, 10000))
     )
+
+    from convergence import evaluate_convergence_model
 
     for som_args in product_dict(**features):
         print(som_args)
 
         scores = []
+        models = []
 
         if args.workers is not None:
             with multiprocessing.Pool(processes=args.workers) as p:
-                scores = p.map(func, [(som_args, seed, sample_range, lids)
-                                      for i in range(args.average_k)])
+                scores_models = p.map(func, [(som_args, seed, sample_range, lids)
+                                             for i in range(args.average_k)])
+            scores, models = list(zip(*scores_models))
         else:
             for k in trange(args.average_k):
                 som = SelfOrganisingMap(**som_args)
@@ -622,8 +635,14 @@ if __name__ == "__main__":
                     else None,
                     seed=seed,
                 )
-                # evaluate_convergence_model(som, lids) # this way you can do it on the fly in training/use it for grid search if needed
+                # This way you can do it on the fly in training/use it for grid search if needed
+                models.append(som)
                 scores.append(scores_dict)
 
         scores_dict = get_average_scores(scores)
-        pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))
+        if grid_search:
+            evals = get_average_evaluation(models, lids)
+            grid_search_results[str(som_args)] = evals
+            pickle.dump(grid_search_results, open(f"output/som/{seed}/grid_search_results.p", "wb"))
+        if save_scores:
+            pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))

@@ -4,6 +4,8 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import ArtistAnimation
+from matplotlib.lines import Line2D
+
 from noga.figures import mode_map
 from som import SelfOrganisingMap
 
@@ -41,6 +43,72 @@ fig.tight_layout()
 fig.savefig(f"output/som/optimal_curves.pdf")
 plt.show()
 
+# Plot number of time steps vs information loss
+fig, ax = plt.subplots()
+for i, (lid, scores) in enumerate(scores_dict.items()):
+    ax.set_xlabel("Number of samples")
+    ax.set_ylabel("Information Loss; KL-Divergence bits")
+
+    plt.plot(sample_range, scores[:, 1], c=colors[i % len(colors)],
+             label=f"{lang_strs.loc[lid, 'language']} ({som.term_size[lid]})")
+    plt.fill_between(sample_range, scores[:, 1] - scores[:, 3], scores[:, 1] + scores[:, 3],
+                     color=colors[i % len(colors)], alpha=0.2)
+plt.legend()
+fig.tight_layout()
+fig.savefig(f"output/som/{seed}/sample_inf_loss.pdf")
+plt.show()
+
+# Plot number of time steps vs complexity
+fig, ax = plt.subplots()
+for i, (lid, scores) in enumerate(scores_dict.items()):
+    ax.set_xlabel("Number of samples")
+    ax.set_ylabel(r"Complexity; $I(W, C)$ bits")
+
+    plt.plot(sample_range, scores[:, 0], c=colors[i % len(colors)],
+             label=f"{lang_strs.loc[lid, 'language']} ({som.term_size[lid]})")
+    plt.fill_between(sample_range, scores[:, 0] - scores[:, 2], scores[:, 0] + scores[:, 2],
+                     color=colors[i % len(colors)], alpha=0.2)
+plt.legend()
+fig.tight_layout()
+fig.savefig(f"output/som/{seed}/sample_complexity.pdf")
+plt.show()
+
+# Plot all selected LIDs on one plot without animation
+handles = []
+labels = []
+fig, ax = plt.subplots()
+for i, (lid, scores) in enumerate(scores_dict.items()):
+    ax.set_xlabel(r"Complexity; $I(W, C)$ bits")
+    ax.set_ylabel("Information Loss; KL-Divergence bits")
+    ax.set_title(lang_strs.loc[lid, "language"])
+
+    frontier = pickle.load(open(f"frontier/learnability_languages/{lid}.p", "rb"))
+    ax.plot(frontier[0], frontier[1])
+
+    X, Y = scores[:-1, :2].T
+    U, V = np.diff(scores[:, :2], axis=0).T
+    ax.quiver(X, Y, U, V,
+              angles="xy",
+              scale_units="xy",
+              scale=1,
+              width=0.005,
+              headwidth=2,
+              color=colors[i % len(colors)],
+              )
+    ax.scatter(
+        X, Y, s=6, edgecolor="white", linewidth=0.5,
+    )
+    handles.append(Line2D([], [],
+                          color="white",
+                          markerfacecolor=colors[i % len(colors)],
+                          marker="o",
+                          markersize=10))
+    labels.append(f"{lang_strs.loc[lid, 'language']} ({som.term_size[lid]})")
+plt.legend(handles, labels)
+fig.tight_layout()
+fig.savefig(f"output/som/{seed}/learning_trajectories.pdf")
+plt.show()
+
 # Plot averaged learning trajectories
 for i, (lid, scores) in enumerate(scores_dict.items()):
     fig, ax = plt.subplots()
@@ -67,7 +135,8 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
         ax.scatter(
             X, Y, s=6, edgecolor="white", linewidth=0.5
         )
-        fig.savefig(f"output/som/{seed}/{lid}/learning_traj.pdf")
+        fig.tight_layout()
+        fig.savefig(f"output/som/{seed}/{lid}/learning_traj_{lid}.pdf")
     else:
         artists = []
         for j, _ in enumerate(sample_range):
@@ -85,6 +154,6 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
             artists.append([q, s])
         anim = ArtistAnimation(fig, artists, blit=True)
         fig.tight_layout()
-        anim.save(f'output/som/{seed}/{lid}/learning_traj.gif')
+        anim.save(f'output/som/{seed}/{lid}/learning_traj_{lid}.gif', dpi=300)
 
     plt.show()

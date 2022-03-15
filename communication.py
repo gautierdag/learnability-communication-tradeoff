@@ -229,8 +229,8 @@ if __name__ == "__main__":
         num_words[i] = sampler.num_words
         # @NOTE: sampler.num_words will tell you how many words are in the language
 
-        if sampler.num_words < 30 or sampler.num_words == prev_num_words or len(scores) > 5:
-            continue
+        # if sampler.num_words < 30 or sampler.num_words == prev_num_words or len(scores) > 5:
+        #     continue
         prev_num_words = sampler.num_words
 
         som = SelfOrganisingMap()
@@ -246,7 +246,7 @@ if __name__ == "__main__":
                 c, w = sampler.sample_indices(sample_range[-1])
 
                 m = np.zeros((som.size, som.size, sampler.num_words + som.distance_matrix.shape[0]))
-                sampling_score = som.learn_language_from_samples(i, (w, c), sample_range,
+                sampling_score = som.learn_language_from_samples(None, (w, c), sample_range,
                                                                  sampler.num_words, m, sampler.prob_matrix.T)
         for score in sampling_scores:
             if i not in scores:

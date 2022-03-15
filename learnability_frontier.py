@@ -1,3 +1,4 @@
+import multiprocessing
 import os.path
 import pickle
 import sys
@@ -94,7 +95,7 @@ def rev_deterministic_annealing_IB(p_x, p_y_x, schedule, init, maxiters=10000, v
     return qs, (rates, distortions)
 
 
-def fit_optimal_curve(language_id: int, ps: np.ndarray, a: float, path: str = "frontier/learnability_languages/"):
+def fit_optimal_curve(language_id: int, ps: np.ndarray, a: float, path: str = None):
     q = (1 - a) * np.eye(ps.shape[0])
     q += (1 - np.eye(ps.shape[0])) * a / (ps.shape[0] - 1)
 
@@ -102,12 +103,34 @@ def fit_optimal_curve(language_id: int, ps: np.ndarray, a: float, path: str = "f
     betas = np.array([2 ** x for x in np.arange(3, 0, -0.01)])
     qss, scores = rev_deterministic_annealing_IB(ps, q, betas, q0, verbose=True)
 
-    pickle.dump(scores, open(os.path.join(path, f"{language_id}.p"), "wb"))
+    if path is not None:
+        pickle.dump(scores, open(os.path.join(path, f"{language_id}.p"), "wb"))
+    return scores
+
+
+def func(args):
+    language_id = args[0]
+    ps = args[1]
+    a = args[2]
+    path = args[3]
+
+    q = (1 - a) * np.eye(ps.shape[0])
+    q += (1 - np.eye(ps.shape[0])) * a / (ps.shape[0] - 1)
+
+    q0 = np.eye(ps.shape[0])
+    betas = np.array([2 ** x for x in np.arange(3, 0, -0.01)])
+    qss, scores = rev_deterministic_annealing_IB(ps, q, betas, q0, verbose=True)
+
+    if path is not None:
+        pickle.dump(scores, open(os.path.join(path, f"{language_id}.p"), "wb"))
     return scores
 
 
 if __name__ == '__main__':
     alpha = 0.33  # Uniform noise level
+    workers = 4
+    save_path = "frontier/learnability_languages/"
+    lids = [2, 32, 35, 108]
 
     if not os.path.exists("frontier"):
         os.mkdir("frontier")
@@ -117,9 +140,16 @@ if __name__ == '__main__':
     # Create a SOM with arbitrary params to load data and calculate data distributions
     som = SelfOrganisingMap()
 
-    for lid, pt_s in som.pt_s.items():
-        if len(sys.argv) > 1 and lid != int(sys.argv[1]):
-            continue
-        print(f"Fitting Language {lid}")
-        ps_l = (pt_s * som.ps_universal).sum(1)
-        fit_optimal_curve(lid, ps_l, alpha)
+    if workers is not None:
+        params = [(lid, (pt_s * som.ps_universal).sum(1), alpha, save_path)
+                  for lid, pt_s in som.pt_s.items() if lid in lids]
+        with multiprocessing.Pool(processes=workers) as p:
+            p.map(func, params)
+    else:
+        for lid, pt_s in som.pt_s.items():
+            if len(sys.argv) > 1 and lid != int(sys.argv[1]):
+                continue
+            if lid not in [2, 32, 35, 108]: continue
+            print(f"Fitting Language {lid}")
+            ps_l = (pt_s * som.ps_universal).sum(1)
+            fit_optimal_curve(lid, ps_l, alpha, save_path)
