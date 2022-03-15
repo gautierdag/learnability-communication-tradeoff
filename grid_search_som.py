@@ -21,7 +21,7 @@ def func(args):
     som = SelfOrganisingMap(**som_args)
     som.learn_languages(
         sample_range_[-1],
-        scoring_steps=sample_range_,
+        scoring_steps=None,
         language_ids=language_ids,
         seed=seed_,
     )
@@ -63,6 +63,6 @@ if __name__ == '__main__':
     pargs = [(args, lids, sample_range, seed) for args in product_dict(**features)]
 
     i = int(sys.argv[1])
-    args_accs = func(pargs[1])
+    args_accs = func(pargs[i])
 
     pickle.dump(args_accs, open(os.path.join(path, f"{i}.p"), "wb"))
