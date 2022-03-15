@@ -515,15 +515,6 @@ def get_average_scores(scores: List[Dict[int, np.ndarray]]) -> Dict[int, np.ndar
     return ret
 
 
-def get_average_evaluation(models: List[SelfOrganisingMap],
-                           language_ids: List[int] = None):
-    accs = []
-    for model in models:
-        acc = evaluate_convergence_model(model, language_ids=language_ids)
-        accs.append(acc)
-    return get_average_scores(accs)
-
-
 def func(args):
     som_ = SelfOrganisingMap(**args[0])
     seed_ = args[1]
@@ -576,27 +567,15 @@ if __name__ == "__main__":
         if not os.path.exists(f"output/som/{seed}/{lid}"):
             os.mkdir(f"output/som/{seed}/{lid}")
 
-    grid_search_results = {}
-    if grid_search:
-        features = {
-            "features": ["xling", "perc"],
-            "sampling": ["corpus", "uniform"],
-            # "sigma": [5.0],
-            "term_weight": [0.1, 0.3, 0.5],
-            "alpha": [0.1, 0.3, 0.5],
-            "size": {7, 10, 12},
-            # "color_prior": ["capacity"],
-        }
-    else:
-        features = {
-            "features": ["perc"],
-            "sampling": ["corpus"],
-            "sigma": [5.0],
-            "term_weight": [0.3],
-            "alpha": [0.1],
-            "size": [12],
-            "color_prior": ["capacity"],
-        }
+    features = {
+        "features": ["perc"],
+        "sampling": ["corpus"],
+        "sigma": [5.0],
+        "term_weight": [0.3],
+        "alpha": [0.1],
+        "size": [12],
+        "color_prior": ["capacity"],
+    }
 
     # Number of samples to draw for each language
     sample_range = (
@@ -640,9 +619,5 @@ if __name__ == "__main__":
                 scores.append(scores_dict)
 
         scores_dict = get_average_scores(scores)
-        if grid_search:
-            evals = get_average_evaluation(models, lids)
-            grid_search_results[str(som_args)] = evals
-            pickle.dump(grid_search_results, open(f"output/som/{seed}/grid_search_results.p", "wb"))
         if save_scores:
             pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))
