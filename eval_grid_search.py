@@ -3,9 +3,13 @@ import os
 import pickle
 
 seed = 42
-path = f"output/som/{seed}/"
+path = f"output/som/{seed}/grid_search"
 
-gs = pickle.load(open(os.path.join(path, "grid_search_results.p"), "rb"))
+gs = {}
+for i in range(54):
+    args, accs = pickle.load(open(os.path.join(path, f"{i}.p"), "rb"))
+    gs[str(args)] = accs
+
 results = {}
 result_params = {}
 for som_params, evals in gs.items():
