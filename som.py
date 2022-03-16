@@ -367,6 +367,7 @@ class SelfOrganisingMap:
             language_ids: List[int] = None,
             save_samples: str = None,
             seed: int = 42,
+            save_pt_s: str = None
     ) -> Dict[int, np.ndarray]:
         """Train the SOM on the given data set and number of time steps.
 
@@ -411,7 +412,8 @@ class SelfOrganisingMap:
 
             m = self.models[lid]
             language_scores = self.learn_language_from_samples(
-                lid, samples, scoring_steps, size, m, pts, f"output/som/{seed}/{lid}/")
+                lid, samples, scoring_steps, size, m, pts,
+                os.path.join(save_pt_s, f"{lid}") if save_pt_s is not None else None)
             scores[lid] = language_scores
         return scores
 
@@ -422,11 +424,12 @@ class SelfOrganisingMap:
                                     n_words: int = None,
                                     m: np.ndarray = None,
                                     pts: np.ndarray = None,
-                                    save_scores: str = None):
+                                    save_pt_s: str = None):
         """ Train the SOM on the given sample set. """
         scores = []
         if language_id is not None:
-            ps_l = (self.pt_s[language_id] * self.ps_universal).sum(1, keepdims=True)
+            # ps_l = 0.9 * self.ps[language_id] + 0.1 * self.ps_universal
+            ps_l = self.ps_universal
         else:
             ps_l = self.ps_universal
         for i, sample in tqdm(enumerate(zip(*samples), 1), desc=f"Language {language_id}"):
@@ -441,7 +444,7 @@ class SelfOrganisingMap:
                         model=m,
                         ps=ps_l,
                         n_words=n_words,
-                        save=os.path.join(save_scores, f"{i}_pt_s.npy") if save_scores is not None else None,
+                        save=os.path.join(save_pt_s, f"{i}_pt_s.npy") if save_pt_s is not None else None,
                     )
                 )
         self.reset_hyperparams()
@@ -520,14 +523,12 @@ def func(args):
     seed_ = args[1]
     sample_range_ = args[2]
     lids_ = args[3]
-    save_samples_ = False
     scores_ = som_.learn_languages(
         sample_range_[-1],
         scoring_steps=sample_range_,
         language_ids=lids_,
-        save_samples=os.path.join("output", "som", str(seed_))
-        if save_samples_
-        else None,
+        save_samples=None,
+        save_pt_s=None,
         seed=seed_,
     )
     return scores_, som_
@@ -547,7 +548,8 @@ if __name__ == "__main__":
     seed = args.seed
     save_xling = True  # Whether to save the cross-linguistic feature space
     grid_search = False
-    save_scores = False
+    save_scores = True
+    save_p = False
     save_samples = False
 
     # lids = list(range(1, 110))
@@ -589,8 +591,6 @@ if __name__ == "__main__":
         + list(range(20000, 100001, 10000))
     )
 
-    from convergence import evaluate_convergence_model
-
     for som_args in product_dict(**features):
         print(som_args)
 
@@ -609,9 +609,8 @@ if __name__ == "__main__":
                     sample_range[-1],
                     scoring_steps=sample_range,
                     language_ids=lids,
-                    save_samples=os.path.join("output", "som", str(seed))
-                    if save_samples
-                    else None,
+                    save_samples=os.path.join("output", "som", str(seed)) if save_samples else None,
+                    save_pt_s=f"output/som/{seed}/" if save_p else None,
                     seed=seed,
                 )
                 # This way you can do it on the fly in training/use it for grid search if needed
@@ -619,5 +618,4 @@ if __name__ == "__main__":
                 scores.append(scores_dict)
 
         scores_dict = get_average_scores(scores)
-        if save_scores:
-            pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))
+        pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))

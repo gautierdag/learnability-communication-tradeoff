@@ -124,7 +124,7 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
     ax.set_title(lang_strs.loc[lid, "language"])
 
     frontier = pickle.load(open(f"frontier/learnability_languages/{lid}.p", "rb"))
-    ax.plot(frontier[0], frontier[1])
+    ax.plot(frontier[0], frontier[1], color=colors[i % len(colors)])
 
     X, Y = scores[:-1, :2].T
     U, V = np.diff(scores[:, :2], axis=0).T
@@ -162,4 +162,4 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
         fig.tight_layout()
         anim.save(f'output/som/{seed}/{lid}/learning_traj_{lid}.gif', dpi=300)
 
-    plt.show()
+    # plt.show()
