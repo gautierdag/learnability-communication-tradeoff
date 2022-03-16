@@ -24,6 +24,12 @@ sample_range = (
 )
 
 som = SelfOrganisingMap()
+
+mode_map(np.roll(som.pt_s[2], 0, 0), chips=np.roll(som.sem_data[["L*", "a*", "b*"]].values, 0, 0))
+plt.figure()
+mode_map(np.roll(som.pt_s[2], 1, 0), chips=np.roll(som.sem_data[["L*", "a*", "b*"]].values, 1, 0))
+plt.show()
+
 scores_dict = pickle.load(open(f"output/som/{seed}/scores_dict.p", "rb"))
 prop_cycle = plt.rcParams["axes.prop_cycle"]
 colors = prop_cycle.by_key()["color"]

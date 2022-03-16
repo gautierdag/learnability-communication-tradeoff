@@ -96,12 +96,12 @@ def get_color_grid(pCW, chips=WCS_CHIPS):
     return grid
 
 
-def mode_map(qW_M, pM=None, small_grid=False):
+def mode_map(qW_M, pM=None, small_grid=False, chips=WCS_CHIPS):
     if pM is None:
         n = qW_M.shape[0]
         pM = np.ones((n, 1)) / n
     qMW = qW_M * pM
-    grid = get_color_grid(qMW)
+    grid = get_color_grid(qMW, chips=chips)
     img = np.flipud(grid2img(grid, small_grid=small_grid))
     r = img[:, :, 0]
     g = img[:, :, 1]
