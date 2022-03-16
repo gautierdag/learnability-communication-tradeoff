@@ -32,19 +32,19 @@ def func(args):
 if __name__ == '__main__':
     seed = 42
     workers = 12
-    lids = [2]  # list(range(1, 111))
+    lids = list(range(1, 111))
     path = f"output/som/{seed}/grid_search"
 
     if not os.path.exists(path):
         os.mkdir(path)
 
     features = {
-        "features": ["xling", "perc"],
+        "features": ["perc"],
         "sampling": ["corpus"],
         "sigma": [5.0],
-        "term_weight": [0.1, 0.3, 0.5],
-        "alpha": [0.1, 0.3, 0.5],
-        "size": {7, 10, 12},
+        "term_weight": [0.01, 0.025, 0.075, 0.1],
+        "alpha": [0.01, 0.025, 0.075, 0.1],
+        "size": {7, 9, 11, 13},
         "color_prior": ["capacity"],
     }
 
