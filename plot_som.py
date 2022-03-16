@@ -1,8 +1,12 @@
+import glob
+import os
+
 import numpy as np
 import pickle
 import pandas as pd
 
 import matplotlib.pyplot as plt
+from PIL import Image
 from matplotlib.animation import ArtistAnimation
 from matplotlib.lines import Line2D
 
@@ -24,12 +28,6 @@ sample_range = (
 )
 
 som = SelfOrganisingMap()
-
-mode_map(np.roll(som.pt_s[2], 0, 0), chips=np.roll(som.sem_data[["L*", "a*", "b*"]].values, 0, 0))
-plt.figure()
-mode_map(np.roll(som.pt_s[2], 1, 0), chips=np.roll(som.sem_data[["L*", "a*", "b*"]].values, 1, 0))
-plt.show()
-
 scores_dict = pickle.load(open(f"output/som/{seed}/scores_dict.p", "rb"))
 prop_cycle = plt.rcParams["axes.prop_cycle"]
 colors = prop_cycle.by_key()["color"]
@@ -162,4 +160,38 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
         fig.tight_layout()
         anim.save(f'output/som/{seed}/{lid}/learning_traj_{lid}.gif', dpi=300)
 
-    # plt.show()
+    plt.show()
+
+# Plot mode maps
+for i, (lid, scores) in enumerate(scores_dict.items()):
+    if not os.path.exists(f"output/som/{seed}/{lid}/mode_maps/"):
+        os.mkdir(f"output/som/{seed}/{lid}/mode_maps/")
+    pt_s_arr = []
+    for file in glob.glob(os.path.join(f"output/som/{seed}/{lid}/*.npy")):
+        pt_s = np.load(file)
+        n_samples = int(file.split(os.sep)[-1].split("_")[0])
+        pt_s_arr.append((n_samples, pt_s))
+    mode_maps = []
+    for j, (n_samples, pt_s) in enumerate(sorted(pt_s_arr, key=lambda x: x[0])):
+        mode_map(pt_s)
+        plt.title(f"K={n_samples}")
+        fig = plt.gcf()
+        fig.tight_layout()
+        fig.canvas.draw()
+        image_from_plot = np.frombuffer(
+            fig.canvas.tostring_rgb(), dtype=np.uint8
+        )
+        figure_size = tuple(
+            np.array(fig.get_size_inches()[::-1] * fig.dpi, dtype=int)
+        ) + (3,)
+        image_from_plot = image_from_plot.reshape(figure_size)
+        mode_maps.append(image_from_plot)
+        fig.savefig(f"output/som/{seed}/{lid}/mode_maps/{j:03}.jpg")
+
+    fp_in = f"output/som/{seed}/{lid}/mode_maps/*.jpg"
+    fp_out = f"output/som/{seed}/{lid}/mode_map.gif"
+
+    imgs = (Image.open(f) for f in sorted(glob.glob(fp_in)))
+    img = next(imgs)  # extract first image from iterator
+    img.save(fp=fp_out, format='GIF', append_images=imgs,
+             save_all=True, duration=250)
