@@ -14,8 +14,7 @@ results = {}
 result_params = {}
 for som_params, evals in gs.items():
     if "xling" in som_params: continue
-    for lid, arr in evals.items():
-        acc = arr[0]
+    for lid, acc in evals.items():
         if lid not in results or results[lid] < acc:
             results[lid] = acc
             result_params[lid] = literal_eval(som_params)

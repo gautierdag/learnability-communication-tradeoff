@@ -191,7 +191,7 @@ def func(args):
 if __name__ == "__main__":
     seed = 42
     average_k = 1
-    workers = 8
+    workers = None
     np.random.seed(seed)
 
     files = glob.glob(os.path.join("frontier", "q_matrices", "*"))
@@ -204,14 +204,14 @@ if __name__ == "__main__":
     scores = {}
 
     sample_range = (
-            list(range(1, 25, 1))
-            + list(range(25, 50, 5))
-            + list(range(50, 100, 10))
-            + list(range(100, 220, 20))
-            + list(range(250, 1000, 50))
-            + list(range(1000, 2100, 100))
-            + list(range(3000, 10001, 1000))
-            + list(range(20000, 100001, 10000))
+        list(range(1, 25, 1))
+        + list(range(25, 50, 5))
+        + list(range(50, 100, 10))
+        + list(range(100, 220, 20))
+        + list(range(250, 1000, 50))
+        + list(range(1000, 2100, 100))
+        + list(range(3000, 10001, 1000))
+        + list(range(20000, 100001, 10000))
     )
 
     prop_cycle = plt.rcParams["axes.prop_cycle"]
@@ -239,15 +239,15 @@ if __name__ == "__main__":
         if workers is not None:
             with multiprocessing.Pool(processes=workers) as p:
                 sampling_scores = p.map(func, [(sampler, sample_range, sampler.num_words, sampler.prob_matrix)
-                                                for j in range(average_k)])
+                                               for j in range(average_k)])
         else:
             for k in range(average_k):
                 # c and w are the chip and word indices as arrays of size N
                 c, w = sampler.sample_indices(sample_range[-1])
 
                 m = np.zeros((som.size, som.size, sampler.num_words + som.distance_matrix.shape[0]))
-                sampling_score = som.learn_language_from_samples(None, (w, c), sample_range,
-                                                                 sampler.num_words, m, sampler.prob_matrix.T)
+                sampling_scores.append(som.learn_language_from_samples(None, (w, c), sample_range,
+                                                                       sampler.num_words, m, sampler.prob_matrix.T))
         for score in sampling_scores:
             if i not in scores:
                 scores[i] = score
@@ -259,9 +259,10 @@ if __name__ == "__main__":
         if not os.path.exists(path):
             os.mkdir(path)
         if not os.path.exists(os.path.join(path, f"{i}.p")):
-            pt_s = sampler.prob_matrix / sampler.prob_matrix.sum(1, keepdims=True)
-            ps = (pt_s * som.ps_universal).sum(1)
-            s = fit_optimal_curve(i, ps, 0.33, path)
+            # pt_s = sampler.prob_matrix / sampler.prob_matrix.sum(1, keepdims=True)
+            # ps = (pt_s * som.ps_universal).sum(1)
+            ps = sampler.prob_matrix.sum(1)
+            s = fit_optimal_curve(i, ps, 0.1, path)
 
         break
 
