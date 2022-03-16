@@ -46,6 +46,8 @@ def evaluate_convergence_model(
     if language_ids is not None:
         data = data[data["language"].isin(language_ids)]
 
+    data = data[~pd.isna(data["word"])]
+
     accs = {}
     for lid, language in data.groupby("language"):
         correct = 0
