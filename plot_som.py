@@ -1,12 +1,12 @@
 import glob
 import os
 
+import imageio
 import numpy as np
 import pickle
 import pandas as pd
 
 import matplotlib.pyplot as plt
-from PIL import Image
 from matplotlib.animation import ArtistAnimation
 from matplotlib.lines import Line2D
 
@@ -189,9 +189,6 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
         fig.savefig(f"output/som/{seed}/{lid}/mode_maps/{j:03}.jpg")
 
     fp_in = f"output/som/{seed}/{lid}/mode_maps/*.jpg"
-    fp_out = f"output/som/{seed}/{lid}/mode_map.gif"
-
-    imgs = (Image.open(f) for f in sorted(glob.glob(fp_in)))
-    img = next(imgs)  # extract first image from iterator
-    img.save(fp=fp_out, format='GIF', append_images=imgs,
-             save_all=True, duration=250)
+    fp_out = f"output/som/{seed}/{lid}/mode_map_{lid}.gif"
+    images = list(map(lambda filename: imageio.imread(filename), sorted(glob.glob(fp_in))))
+    imageio.mimsave(os.path.join(fp_out), images, duration=0.25)
