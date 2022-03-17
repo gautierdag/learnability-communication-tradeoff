@@ -226,7 +226,9 @@ class SelfOrganisingMap:
         dists = {}
         for lid, data in self.term_data.groupby("language"):
             size = self.term_size[lid]
+            data = data[~data.word.isna()]
             words = data["word"].unique()
+            words.sort()
             pt_s = np.zeros((NUM_CHIPS, size))
             ps = np.zeros(NUM_CHIPS)
             for i, (chip, chip_data) in enumerate(data.groupby("chip")):
@@ -270,7 +272,7 @@ class SelfOrganisingMap:
                     if verbose:
                         print(iters, np.round(((r_x - r0) ** 2).sum() ** 0.5, 10))
                 ps[lid] = r_x
-            self.ps = ps
+            self.ps = ps[:, None]
             pickle.dump(ps, open("ps.p", "wb"))
 
     def forward(self, m: np.ndarray, x: np.ndarray):
@@ -553,8 +555,8 @@ if __name__ == "__main__":
     save_samples = False
 
     # lids = list(range(1, 110))
-    lids = [2, 32, 35, 108]
-    # lids = [2]
+    # lids = [2, 32, 35, 108]
+    lids = [2]
 
     np.seterr(divide="ignore")
     np.random.seed(seed)
