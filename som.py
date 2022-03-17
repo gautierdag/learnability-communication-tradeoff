@@ -555,8 +555,8 @@ if __name__ == "__main__":
     save_samples = False
 
     # lids = list(range(1, 110))
-    # lids = [2, 32, 35, 108]
-    lids = [2]
+    lids = [2, 32, 35, 108]
+    # lids = [2]
 
     np.seterr(divide="ignore")
     np.random.seed(seed)
@@ -571,16 +571,6 @@ if __name__ == "__main__":
         if not os.path.exists(f"output/som/{seed}/{lid}"):
             os.mkdir(f"output/som/{seed}/{lid}")
 
-    features = {
-        "features": ["perc"],
-        "sampling": ["corpus"],
-        "sigma": [5.0],
-        "term_weight": [0.3],
-        "alpha": [0.1],
-        "size": [12],
-        "color_prior": ["capacity"],
-    }
-
     # Number of samples to draw for each language
     sample_range = (
         list(range(1, 25, 1))
@@ -593,7 +583,10 @@ if __name__ == "__main__":
         + list(range(20000, 100001, 10000))
     )
 
-    for som_args in product_dict(**features):
+    optimal_hyper_params = pickle.load(open("grid_search_params.p", "rb"))
+
+    for lid in lids:
+        som_args = optimal_hyper_params[lid]
         print(som_args)
 
         scores = []
@@ -601,7 +594,7 @@ if __name__ == "__main__":
 
         if args.workers is not None:
             with multiprocessing.Pool(processes=args.workers) as p:
-                scores_models = p.map(func, [(som_args, seed, sample_range, lids)
+                scores_models = p.map(func, [(som_args, seed, sample_range, [lid])
                                              for i in range(args.average_k)])
             scores, models = list(zip(*scores_models))
         else:
@@ -610,7 +603,7 @@ if __name__ == "__main__":
                 scores_dict = som.learn_languages(
                     sample_range[-1],
                     scoring_steps=sample_range,
-                    language_ids=lids,
+                    language_ids=[lid],
                     save_samples=os.path.join("output", "som", str(seed)) if save_samples else None,
                     save_pt_s=f"output/som/{seed}/" if save_p else None,
                     seed=seed,
