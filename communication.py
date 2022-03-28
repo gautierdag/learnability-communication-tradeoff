@@ -1,3 +1,4 @@
+import argparse
 import os
 import pickle
 from typing import Tuple
@@ -179,22 +180,41 @@ class LanguageSampler:
 
 
 def func(args):
-    sampler_, sample_range_, nw, pts = args
+    sampler_, sample_range_, nw, pts, path_ = args
     c_, w_ = sampler_.sample_indices(sample_range_[-1])
     som_ = SelfOrganisingMap()
     m_ = np.zeros((som_.size, som_.size, nw + som_.distance_matrix.shape[0]))
     score_ = som_.learn_language_from_samples(None, (w_, c_), sample_range_,
-                                              nw, m_, pts.T)
+                                              nw, m_, pts.T,
+                                              save_pt_s=path_)
     return score_
 
 
 if __name__ == "__main__":
-    seed = 42
-    average_k = 1
-    workers = None
+    parser = argparse.ArgumentParser(description="Run SOM on CE-optimal languages")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="random seed")
+    parser.add_argument("--average_k", type=int, default=10,
+                        help="The number of learners to average over for the developmental plots.")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="If given, then use multiprocessing with given number of workers.")
+    parser.add_argument("--optimal", action="store_true", default=False,
+                        help="Whether to use CE-optimal or suboptimal languages.")
+
+    args = parser.parse_args()
+
+    print(args)
+
+    seed = args.seed
+    average_k = args.average_k
+    workers = args.workers
+    save_scores = False
     np.random.seed(seed)
 
-    files = glob.glob(os.path.join("frontier", "q_matrices", "*"))
+    if args.optimal:
+        files = glob.glob(os.path.join("frontier", "q_matrices", "*"))
+    else:
+        files = glob.glob(os.path.join("output", "worst_qs", "*"))
 
     N = 1000  # number of samples to sample from frontier language
     betas = {}
@@ -204,18 +224,15 @@ if __name__ == "__main__":
     scores = {}
 
     sample_range = (
-        list(range(1, 25, 1))
-        + list(range(25, 50, 5))
-        + list(range(50, 100, 10))
-        + list(range(100, 220, 20))
-        + list(range(250, 1000, 50))
-        + list(range(1000, 2100, 100))
-        + list(range(3000, 10001, 1000))
-        + list(range(20000, 100001, 10000))
+            list(range(1, 25, 1))
+            + list(range(25, 50, 5))
+            + list(range(50, 100, 10))
+            + list(range(100, 220, 20))
+            + list(range(250, 1000, 50))
+            + list(range(1000, 2100, 100))
+            + list(range(3000, 10001, 1000))
+            + list(range(20000, 100001, 10000))
     )
-
-    prop_cycle = plt.rcParams["axes.prop_cycle"]
-    colors = prop_cycle.by_key()["color"]
 
     prev_num_words = 0
     for i, f in enumerate(files):
@@ -227,18 +244,26 @@ if __name__ == "__main__":
         distortions.append(distortion)
         sampler = LanguageSampler(f)
         num_words[i] = sampler.num_words
-        # @NOTE: sampler.num_words will tell you how many words are in the language
 
-        # if sampler.num_words < 30 or sampler.num_words == prev_num_words or len(scores) > 5:
-        #     continue
-        prev_num_words = sampler.num_words
+        if args.optimal and num_words[i] < prev_num_words + 10:
+            continue
+        prev_num_words = num_words[i]
+
+        print(i, f, num_words[i])
 
         som = SelfOrganisingMap()
+
+        save_path = None
+        if not args.optimal:
+            save_path = os.path.join("output", "som", f"{seed}", "ce", f"{int(beta)}")
+            if not os.path.exists(save_path):
+                os.mkdir(save_path)
 
         sampling_scores = []
         if workers is not None:
             with multiprocessing.Pool(processes=workers) as p:
-                sampling_scores = p.map(func, [(sampler, sample_range, sampler.num_words, sampler.prob_matrix)
+                sampling_scores = p.map(func, [(sampler, sample_range, sampler.num_words,
+                                                sampler.prob_matrix, save_path)
                                                for j in range(average_k)])
         else:
             for k in range(average_k):
@@ -247,50 +272,20 @@ if __name__ == "__main__":
 
                 m = np.zeros((som.size, som.size, sampler.num_words + som.distance_matrix.shape[0]))
                 sampling_scores.append(som.learn_language_from_samples(None, (w, c), sample_range,
-                                                                       sampler.num_words, m, sampler.prob_matrix.T))
-        for score in sampling_scores:
-            if i not in scores:
-                scores[i] = score
-            else:
-                scores[i] += score
-        scores[i] /= average_k
+                                                                       sampler.num_words, m, sampler.prob_matrix.T,
+                                                                       save_pt_s=save_path))
+        np_scores = np.array(sampling_scores)
+        scores[i] = np.hstack([np.mean(np_scores, 0), np.std(np_scores, 0)])
 
-        path = f"frontier/learnability_communicative/"
-        if not os.path.exists(path):
-            os.mkdir(path)
-        if not os.path.exists(os.path.join(path, f"{i}.p")):
-            # pt_s = sampler.prob_matrix / sampler.prob_matrix.sum(1, keepdims=True)
-            # ps = (pt_s * som.ps_universal).sum(1)
-            ps = sampler.prob_matrix.sum(1)
-            s = fit_optimal_curve(i, ps, 0.1, path)
+        # path = f"frontier/learnability_communicative/"
+        # if not os.path.exists(path):
+        #     os.mkdir(path)
+        # if not os.path.exists(os.path.join(path, f"{i}.p")):
+        #     ps = sampler.prob_matrix.sum(1)
+        #     s = fit_optimal_curve(i, ps, 0.1, path)
 
-        break
-
-    pickle.dump(scores, open(f"output/som/{seed}/ce_scores_dict.p", "wb"))
-
-    for j, s in scores.items():
-        plt.quiver(
-            *s[:-1, :2].T,
-            *np.diff(s[:, :2], axis=0).T,
-            angles="xy",
-            scale_units="xy",
-            scale=1,
-            width=0.005,
-            headwidth=2,
-            color=colors[j % len(colors)]
-        )
-        plt.scatter(
-            s[:, 0], s[:, 1], s=6, edgecolor="white", linewidth=0.5
-        )
-        plt.xlabel("Complexity; $I(H, C)$ bits")
-        plt.ylabel("Information Loss; KL-Divergence bits")
-        plt.title("Learning curve for communicatively optimal system\n" +
-                  rf"with $\beta=${betas[j]:.4f}; $K=${num_words[j]}")
-
-        path = f"frontier/learnability_communicative/{i}.p"
-        s = pickle.load(open(path, "rb"))
-        plt.plot(s[0], s[1])
-
-        plt.gcf().tight_layout()
-        plt.savefig(f"output/som/ce_opt_{num_words[i]}.pdf")
-        plt.show()
+    if save_scores:
+        if args.optimal:
+            pickle.dump((betas, num_words, scores), open(f"output/som/{seed}/ce/optimal_scores_dict.p", "wb"))
+        else:
+            pickle.dump((betas, num_words, scores), open(f"output/som/{seed}/ce/suboptimal_scores_dict.p", "wb"))

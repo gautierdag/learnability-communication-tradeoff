@@ -14,7 +14,6 @@ from tqdm import tqdm, trange
 from noga.tools import MI, DKL
 
 NUM_CHIPS = 330
-COLOR_PRIOR_EXCLUDED = [7, 19, 20, 25, 27, 31, 38, 48, 70, 80, 88, 91, 92, 93]
 
 
 def product_dict(**kwargs):
@@ -32,9 +31,9 @@ class SelfOrganisingMap:
     def __init__(
             self,
             size: int = 12,
-            alpha: float = 0.1,
+            alpha: float = 0.05,
             sigma: float = 5.0,
-            term_weight: float = 0.3,
+            term_weight: float = 0.1,
             wcs_path: str = "wcs",
             features: str = "perc",
             sampling: str = "corpus",
