@@ -263,6 +263,18 @@ if __name__ == "__main__":
                 sampling_scores.append(som.learn_language_from_samples(None, (w, c), sample_range,
                                                                        sampler.num_words, m, sampler.prob_matrix.T,
                                                                        save_pt_s=save_path))
+
+                # Load all saved p_t_s and join to already calculated ones
+                if save_path:
+                    for s in sample_range:
+                        p_t_s = np.load(os.path.join(save_path, f"{s}_pt_s.npy"))
+                        if not os.path.exists(os.path.join(save_path, f"{s}_pt_s_all.npy")):
+                            joined = p_t_s[None, :]
+                        else:
+                            joined = np.load(os.path.join(save_path, f"{s}_pt_s_all.npy"))
+                            joined = np.vstack([joined, p_t_s[None, :]])
+                        np.save(os.path.join(save_path, f"{s}_pt_s_all.npy"), joined)
+
         np_scores = np.array(sampling_scores)
         scores[i] = np.hstack([np.mean(np_scores, 0), np.std(np_scores, 0)])
 
