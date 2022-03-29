@@ -23,7 +23,7 @@ sample_range = (
         + list(range(100, 220, 20))
         + list(range(250, 1000, 50))
         + list(range(1000, 2100, 100))
-        + list(range(3000, 100001, 1000))
+        + list(range(2100, 10250, 250))
 )
 
 
