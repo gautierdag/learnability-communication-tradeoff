@@ -18,12 +18,12 @@ NUM_CHIPS = 330
 # Number of samples to draw for each language
 sample_range = (
         list(range(1, 25, 1))
-        + list(range(25, 50, 5))
-        + list(range(50, 100, 10))
-        + list(range(100, 220, 20))
-        + list(range(250, 1000, 50))
-        + list(range(1000, 2100, 100))
-        + list(range(3000, 100001, 1000))
+        # + list(range(25, 50, 5))
+        # + list(range(50, 100, 10))
+        # + list(range(100, 220, 20))
+        # + list(range(250, 1000, 50))
+        # + list(range(1000, 2100, 100))
+        # + list(range(3000, 100001, 1000))
 )
 
 
@@ -553,6 +553,7 @@ if __name__ == "__main__":
                                                                  "average over for the developmental plots.")
     parser.add_argument("--workers", type=int, default=None, help="If given, then use multiprocessing with "
                                                                   "given number of workers.")
+    parser.add_argument("--lid", type=int, default=None, help="ID of language to learn.")
 
     args = parser.parse_args()
 
@@ -560,12 +561,15 @@ if __name__ == "__main__":
     seed = args.seed
     save_xling = True  # Whether to save the cross-linguistic feature space
     grid_search = False
-    save_scores = True
-    save_p = False
+    save_scores = False
+    save_p = True
     save_samples = False
 
     # lids = list(range(1, 110))
-    lids = [2, 32, 35, 108]
+    if args.lid is not None:
+        lids = [args.lid]
+    else:
+        lids = [2, 32, 35, 108]
     # lids = [2]
 
     np.seterr(divide="ignore")
@@ -606,9 +610,19 @@ if __name__ == "__main__":
                     save_pt_s=f"output/som/{seed}/" if save_p else None,
                     seed=seed,
                 )
-                # This way you can do it on the fly in training/use it for grid search if needed
                 models.append(som)
                 scores.append(scores_dict)
+
+                # Load all saved p_t_s and join to already calculated ones
+                if save_p:
+                    for s in sample_range:
+                        p_t_s = np.load(f"output/som/{seed}/{lid}/{s}_pt_s.npy")
+                        if not os.path.exists(f"output/som/{seed}/{lid}/{s}_pt_s_all.npy"):
+                            joined = p_t_s[None, :]
+                        else:
+                            joined = np.load(f"output/som/{seed}/{lid}/{s}_pt_s_all.npy")
+                            joined = np.vstack([joined, p_t_s[None, :]])
+                        np.save(f"output/som/{seed}/{lid}/{s}_pt_s_all.npy", joined)
 
         scores_dict = get_average_scores(scores)
         pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))
