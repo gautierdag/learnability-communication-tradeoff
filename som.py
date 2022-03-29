@@ -42,9 +42,9 @@ class SelfOrganisingMap:
     def __init__(
             self,
             size: int = 12,
-            alpha: float = 0.05,
+            alpha: float = 0.1,
             sigma: float = 5.0,
-            term_weight: float = 0.1,
+            term_weight: float = 0.025,
             wcs_path: str = "wcs",
             features: str = "perc",
             sampling: str = "corpus",
