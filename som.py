@@ -591,7 +591,6 @@ if __name__ == "__main__":
         print(som_args)
 
         scores = []
-        models = []
 
         if args.workers is not None:
             with multiprocessing.Pool(processes=args.workers) as p:
@@ -609,7 +608,6 @@ if __name__ == "__main__":
                     save_pt_s=f"output/som/{seed}/" if save_p else None,
                     seed=seed,
                 )
-                models.append(som)
                 scores.append(scores_dict)
 
                 # Load all saved p_t_s and join to already calculated ones
