@@ -440,8 +440,7 @@ class SelfOrganisingMap:
         """ Train the SOM on the given sample set. """
         scores = []
         if language_id is not None:
-            # ps_l = 0.9 * self.ps[language_id] + 0.1 * self.ps_universal
-            ps_l = self.ps_universal
+            ps_l = 0.9 * self.ps[language_id] + 0.1 * self.ps_universal
         else:
             ps_l = self.ps_universal
         for i, sample in tqdm(enumerate(zip(*samples), 1), desc=f"Language {language_id}"):
@@ -561,7 +560,6 @@ if __name__ == "__main__":
     seed = args.seed
     save_xling = True  # Whether to save the cross-linguistic feature space
     grid_search = False
-    save_scores = False
     save_p = True
     save_samples = False
 
