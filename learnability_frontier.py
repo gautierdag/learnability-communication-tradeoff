@@ -129,9 +129,9 @@ def func(args):
 if __name__ == '__main__':
     alpha = 0.1  # Uniform noise level
     beta = 0.1  # Weight of the capacity achieving prior for ps
-    workers = 4
+    workers = None
     save_path = "frontier/learnability_languages/"
-    lids = [2, 32, 35, 108]
+    lids = [2]
 
     if not os.path.exists("frontier"):
         os.mkdir("frontier")
@@ -142,16 +142,12 @@ if __name__ == '__main__':
     som = SelfOrganisingMap()
 
     if workers is not None:
-        params = [(lid, np.squeeze((1 - beta) * ps + beta * som.ps_universal), alpha, save_path)
-                  for lid, ps in som.ps.items() if lid in lids]
+        params = [(lid, np.squeeze((1 - beta) * som.ps[lid] + beta * som.ps_universal), alpha, save_path)
+                  for lid in lids]
         with multiprocessing.Pool(processes=workers) as p:
             p.map(func, params)
     else:
-        for lid, pt_s in som.pt_s.items():
-            if len(sys.argv) > 1 and lid != int(sys.argv[1]):
-                continue
-            if lid not in [2, 32, 35, 108]: continue
+        for lid in lids:
             print(f"Fitting Language {lid}")
-            # ps_l = (pt_s * som.ps_universal).sum(1)
             ps_l = (1 - beta) * som.ps[lid] + beta * som.ps_universal
-            fit_optimal_curve(lid, ps_l, alpha, save_path)
+            fit_optimal_curve(lid, np.squeeze(ps_l), alpha, save_path)

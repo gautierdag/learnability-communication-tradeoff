@@ -13,8 +13,8 @@ from matplotlib.lines import Line2D
 from noga.figures import mode_map
 from som import SelfOrganisingMap, sample_range
 
-animate = True
-lids = [2, 32, 35, 108]  # range(1, 111)
+animate = False
+lids = [2]  # range(1, 111)
 seed = 42
 
 
@@ -154,32 +154,33 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
     plt.show()
 
 # Plot mode maps
-for i, (lid, scores) in enumerate(scores_dict.items()):
-    if not os.path.exists(f"output/som/{seed}/{lid}/mode_maps/"):
-        os.mkdir(f"output/som/{seed}/{lid}/mode_maps/")
-    pt_s_arr = []
-    for file in glob.glob(os.path.join(f"output/som/{seed}/{lid}/*.npy")):
-        pt_s = np.load(file)
-        n_samples = int(file.split(os.sep)[-1].split("_")[0])
-        pt_s_arr.append((n_samples, pt_s))
-    mode_maps = []
-    for j, (n_samples, pt_s) in enumerate(sorted(pt_s_arr, key=lambda x: x[0])):
-        mode_map(pt_s)
-        plt.title(f"K={n_samples}")
-        fig = plt.gcf()
-        fig.tight_layout()
-        fig.canvas.draw()
-        image_from_plot = np.frombuffer(
-            fig.canvas.tostring_rgb(), dtype=np.uint8
-        )
-        figure_size = tuple(
-            np.array(fig.get_size_inches()[::-1] * fig.dpi, dtype=int)
-        ) + (3,)
-        image_from_plot = image_from_plot.reshape(figure_size)
-        mode_maps.append(image_from_plot)
-        fig.savefig(f"output/som/{seed}/{lid}/mode_maps/{j:03}.jpg")
+if animate:
+    for i, (lid, scores) in enumerate(scores_dict.items()):
+        if not os.path.exists(f"output/som/{seed}/{lid}/mode_maps/"):
+            os.mkdir(f"output/som/{seed}/{lid}/mode_maps/")
+        pt_s_arr = []
+        for file in glob.glob(os.path.join(f"output/som/{seed}/{lid}/*.npy")):
+            pt_s = np.load(file)
+            n_samples = int(file.split(os.sep)[-1].split("_")[0])
+            pt_s_arr.append((n_samples, pt_s))
+        mode_maps = []
+        for j, (n_samples, pt_s) in enumerate(sorted(pt_s_arr, key=lambda x: x[0])):
+            mode_map(pt_s)
+            plt.title(f"K={n_samples}")
+            fig = plt.gcf()
+            fig.tight_layout()
+            fig.canvas.draw()
+            image_from_plot = np.frombuffer(
+                fig.canvas.tostring_rgb(), dtype=np.uint8
+            )
+            figure_size = tuple(
+                np.array(fig.get_size_inches()[::-1] * fig.dpi, dtype=int)
+            ) + (3,)
+            image_from_plot = image_from_plot.reshape(figure_size)
+            mode_maps.append(image_from_plot)
+            fig.savefig(f"output/som/{seed}/{lid}/mode_maps/{j:03}.jpg")
 
-    fp_in = f"output/som/{seed}/{lid}/mode_maps/*.jpg"
-    fp_out = f"output/som/{seed}/{lid}/mode_map_{lid}.gif"
-    images = list(map(lambda filename: imageio.imread(filename), sorted(glob.glob(fp_in))))
-    imageio.mimsave(os.path.join(fp_out), images, duration=0.25)
+        fp_in = f"output/som/{seed}/{lid}/mode_maps/*.jpg"
+        fp_out = f"output/som/{seed}/{lid}/mode_map_{lid}.gif"
+        images = list(map(lambda filename: imageio.imread(filename), sorted(glob.glob(fp_in))))
+        imageio.mimsave(os.path.join(fp_out), images, duration=0.25)
