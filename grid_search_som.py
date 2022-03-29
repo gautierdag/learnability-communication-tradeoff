@@ -4,7 +4,7 @@ import pickle
 import sys
 
 from convergence import evaluate_convergence_model
-from som import SelfOrganisingMap, product_dict
+from som import SelfOrganisingMap, product_dict, sample_range
 
 
 def func(args):
@@ -47,18 +47,6 @@ if __name__ == '__main__':
         "size": {7, 9, 11, 13},
         "color_prior": ["capacity"],
     }
-
-    # Number of samples to draw for each language
-    sample_range = (
-            list(range(1, 25, 1))
-            + list(range(25, 50, 5))
-            + list(range(50, 100, 10))
-            + list(range(100, 220, 20))
-            + list(range(250, 1000, 50))
-            + list(range(1000, 2100, 100))
-            + list(range(3000, 10001, 1000))
-            + list(range(20000, 100001, 10000))
-    )
 
     pargs = [(args, lids, sample_range, seed) for args in product_dict(**features)]
 

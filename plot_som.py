@@ -11,21 +11,12 @@ from matplotlib.animation import ArtistAnimation
 from matplotlib.lines import Line2D
 
 from noga.figures import mode_map
-from som import SelfOrganisingMap
+from som import SelfOrganisingMap, sample_range
 
 animate = True
 lids = [2, 32, 35, 108]  # range(1, 111)
 seed = 42
-sample_range = (
-        list(range(1, 25, 1))
-        + list(range(25, 50, 5))
-        + list(range(50, 100, 10))
-        + list(range(100, 220, 20))
-        + list(range(250, 1000, 50))
-        + list(range(1000, 2100, 100))
-        + list(range(3000, 10001, 1000))
-        + list(range(20000, 100001, 10000))
-)
+
 
 som = SelfOrganisingMap()
 scores_dict = pickle.load(open(f"output/som/{seed}/scores_dict.p", "rb"))

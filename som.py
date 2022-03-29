@@ -15,6 +15,17 @@ from noga.tools import MI, DKL
 
 NUM_CHIPS = 330
 
+# Number of samples to draw for each language
+sample_range = (
+        list(range(1, 25, 1))
+        + list(range(25, 50, 5))
+        + list(range(50, 100, 10))
+        + list(range(100, 220, 20))
+        + list(range(250, 1000, 50))
+        + list(range(1000, 2100, 100))
+        + list(range(3000, 100001, 1000))
+)
+
 
 def product_dict(**kwargs):
     keys = kwargs.keys()
@@ -569,18 +580,6 @@ if __name__ == "__main__":
     for lid in lids:
         if not os.path.exists(f"output/som/{seed}/{lid}"):
             os.mkdir(f"output/som/{seed}/{lid}")
-
-    # Number of samples to draw for each language
-    sample_range = (
-        list(range(1, 25, 1))
-        + list(range(25, 50, 5))
-        + list(range(50, 100, 10))
-        + list(range(100, 220, 20))
-        + list(range(250, 1000, 50))
-        + list(range(1000, 2100, 100))
-        + list(range(3000, 10001, 1000))
-        + list(range(20000, 100001, 10000))
-    )
 
     optimal_hyper_params = pickle.load(open("grid_search_params.p", "rb"))
 

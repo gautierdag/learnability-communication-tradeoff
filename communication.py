@@ -11,7 +11,7 @@ import glob
 import multiprocessing
 
 from learnability_frontier import fit_optimal_curve
-from som import SelfOrganisingMap
+from som import SelfOrganisingMap, sample_range
 
 NUM_MEANINGS = 330
 
@@ -222,17 +222,6 @@ if __name__ == "__main__":
     rates = []
     distortions = []
     scores = {}
-
-    sample_range = (
-            list(range(1, 25, 1))
-            + list(range(25, 50, 5))
-            + list(range(50, 100, 10))
-            + list(range(100, 220, 20))
-            + list(range(250, 1000, 50))
-            + list(range(1000, 2100, 100))
-            + list(range(3000, 10001, 1000))
-            + list(range(20000, 100001, 10000))
-    )
 
     prev_num_words = 0
     for i, f in enumerate(files):
