@@ -18,12 +18,12 @@ NUM_CHIPS = 330
 # Number of samples to draw for each language
 sample_range = (
         list(range(1, 25, 1))
-        # + list(range(25, 50, 5))
-        # + list(range(50, 100, 10))
-        # + list(range(100, 220, 20))
-        # + list(range(250, 1000, 50))
-        # + list(range(1000, 2100, 100))
-        # + list(range(3000, 100001, 1000))
+        + list(range(25, 50, 5))
+        + list(range(50, 100, 10))
+        + list(range(100, 220, 20))
+        + list(range(250, 1000, 50))
+        + list(range(1000, 2100, 100))
+        + list(range(3000, 100001, 1000))
 )
 
 
