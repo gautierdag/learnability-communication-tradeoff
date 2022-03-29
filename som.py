@@ -555,6 +555,7 @@ if __name__ == "__main__":
     parser.add_argument("--lid", type=int, default=None, help="ID of language to learn.")
 
     args = parser.parse_args()
+    print(args)
 
     # Global parameters
     seed = args.seed
@@ -563,12 +564,10 @@ if __name__ == "__main__":
     save_p = True
     save_samples = False
 
-    # lids = list(range(1, 110))
     if args.lid is not None:
         lids = [args.lid]
     else:
         lids = [2, 32, 35, 108]
-    # lids = [2]
 
     np.seterr(divide="ignore")
     np.random.seed(seed)
