@@ -10,6 +10,8 @@ from scipy.stats import multivariate_normal
 import glob
 import multiprocessing
 
+from tqdm import trange
+
 from learnability_frontier import fit_optimal_curve
 from som import SelfOrganisingMap, sample_range
 
@@ -236,7 +238,8 @@ if __name__ == "__main__":
         sampler = LanguageSampler(f)
         num_words[i] = sampler.num_words
 
-        if num_words[i] <= prev_num_words:
+        if prev_num_words > 0 and num_words[i] <= prev_num_words + 2:
+            prev_num_words = num_words[i]
             continue
         prev_num_words = num_words[i]
 
@@ -260,7 +263,7 @@ if __name__ == "__main__":
                                                 sampler.prob_matrix, save_path)
                                                for j in range(average_k)])
         else:
-            for k in range(average_k):
+            for k in trange(average_k):
                 # c and w are the chip and word indices as arrays of size N
                 c, w = sampler.sample_indices(sample_range[-1])
 
