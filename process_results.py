@@ -28,7 +28,7 @@ def accuracy(arr, lid, som, language):
     return accs
 
 
-def convergence(arr, window=3, threshold=1):
+def convergence(arr, window=20, threshold=0.01):
     convs = []
     for accuracies in arr:
         for i in np.arange(len(accuracies) - window):
