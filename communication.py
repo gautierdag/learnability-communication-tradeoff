@@ -217,6 +217,8 @@ if __name__ == "__main__":
     else:
         files = glob.glob(os.path.join("output", "worst_qs", "*"))
 
+    files = sorted(files, key=lambda x: float(x.split(os.sep)[-1].split("_")[0]))
+
     betas = {}
     num_words = {}
     rates = []
