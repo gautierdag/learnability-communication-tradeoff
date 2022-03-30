@@ -14,7 +14,7 @@ from noga.figures import mode_map
 from som import SelfOrganisingMap, sample_range
 
 animate = False
-lids = [2]  # range(1, 111)
+lids = [1,2,3,4]  # range(1, 111)
 seed = 42
 
 
@@ -41,6 +41,7 @@ plt.show()
 # Plot number of time steps vs information loss
 fig, ax = plt.subplots()
 for i, (lid, scores) in enumerate(scores_dict.items()):
+    if lid not in lids: continue
     ax.set_xlabel("Number of samples")
     ax.set_ylabel("Information Loss; KL-Divergence bits")
 
@@ -56,6 +57,8 @@ plt.show()
 # Plot number of time steps vs complexity
 fig, ax = plt.subplots()
 for i, (lid, scores) in enumerate(scores_dict.items()):
+    if lid not in lids: continue
+
     ax.set_xlabel("Number of samples")
     ax.set_ylabel(r"Complexity; $I(W, C)$ bits")
 
@@ -73,6 +76,8 @@ handles = []
 labels = []
 fig, ax = plt.subplots()
 for i, (lid, scores) in enumerate(scores_dict.items()):
+    if lid not in lids: continue
+
     ax.set_xlabel(r"Complexity; $I(W, C)$ bits")
     ax.set_ylabel("Information Loss; KL-Divergence bits")
     ax.set_title(lang_strs.loc[lid, "language"])
@@ -106,6 +111,8 @@ plt.show()
 
 # Plot averaged learning trajectories
 for i, (lid, scores) in enumerate(scores_dict.items()):
+    if lid not in lids: continue
+
     fig, ax = plt.subplots()
 
     ax.set_xlabel("Complexity; $I(W, C)$ bits")
@@ -156,6 +163,8 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
 # Plot mode maps
 if animate:
     for i, (lid, scores) in enumerate(scores_dict.items()):
+        if lid not in lids: continue
+
         if not os.path.exists(f"output/som/{seed}/{lid}/mode_maps/"):
             os.mkdir(f"output/som/{seed}/{lid}/mode_maps/")
         pt_s_arr = []
