@@ -62,7 +62,7 @@ if __name__ == '__main__':
     pts = som.pts[lid]
     data = data[data["language"] == lid]
 
-    samples = sorted(glob.glob(os.path.join(lid_folder, "*")),
+    samples = sorted(glob.glob(os.path.join(lid_folder, "*_all.npy")),
                      key=lambda x: int(x.split(os.sep)[-1].split("_")[0]))
     for i, sample_file in enumerate(samples):
         print(f"Processing {sample_file}")
