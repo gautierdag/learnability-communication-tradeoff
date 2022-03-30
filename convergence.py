@@ -13,7 +13,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-def get_acc(p_t_s: np.ndarray, lid: int, som: SelfOrganisingMap, language: pd.DataFrame):
+def get_accuracy(p_t_s: np.ndarray, lid: int, som: SelfOrganisingMap, language: pd.DataFrame):
     correct = 0
     ts = np.argmax(p_t_s, axis=1)
     for cid, chip in language.groupby("chip"):
@@ -55,7 +55,7 @@ def evaluate_convergence_model(
     accs = defaultdict(list)
     for lid, language in data.groupby("language"):
         for p in p_t_s[lid]:
-            accs[lid].append(get_acc(p, lid, som, language))
+            accs[lid].append(get_accuracy(p, lid, som, language))
     return accs
 
 
