@@ -200,6 +200,7 @@ if __name__ == "__main__":
                         help="If given, then use multiprocessing with given number of workers.")
     parser.add_argument("--optimal", action="store_true", default=False,
                         help="Whether to use CE-optimal or suboptimal languages.")
+    parser.add_argument("--i", type=int, default=None, help="Select a particular beta by index. ")
 
     args = parser.parse_args()
 
@@ -216,7 +217,6 @@ if __name__ == "__main__":
     else:
         files = glob.glob(os.path.join("output", "worst_qs", "*"))
 
-    N = 1000  # number of samples to sample from frontier language
     betas = {}
     num_words = {}
     rates = []
@@ -234,19 +234,22 @@ if __name__ == "__main__":
         sampler = LanguageSampler(f)
         num_words[i] = sampler.num_words
 
-        if args.optimal and num_words[i] < prev_num_words + 10:
+        if num_words[i] <= prev_num_words:
             continue
         prev_num_words = num_words[i]
+
+        if args.i is not None and i != args.i:
+            continue
 
         print(i, f, num_words[i])
 
         som = SelfOrganisingMap()
 
-        save_path = None
-        if not args.optimal:
-            save_path = os.path.join("output", "som", f"{seed}", "ce", f"{int(beta)}")
-            if not os.path.exists(save_path):
-                os.mkdir(save_path)
+        save_path = os.path.join("output", "som", f"{seed}", "ce", f"{int(beta) if not args.optimal else beta}")
+        if not os.path.exists(os.path.join("output", "som", f"{seed}", "ce")):
+            os.mkdir(os.path.join("output", "som", f"{seed}", "ce"))
+        if not os.path.exists(save_path):
+            os.mkdir(save_path)
 
         sampling_scores = []
         if workers is not None:
@@ -277,13 +280,6 @@ if __name__ == "__main__":
 
         np_scores = np.array(sampling_scores)
         scores[i] = np.hstack([np.mean(np_scores, 0), np.std(np_scores, 0)])
-
-        # path = f"frontier/learnability_communicative/"
-        # if not os.path.exists(path):
-        #     os.mkdir(path)
-        # if not os.path.exists(os.path.join(path, f"{i}.p")):
-        #     ps = sampler.prob_matrix.sum(1)
-        #     s = fit_optimal_curve(i, ps, 0.1, path)
 
     if save_scores:
         if args.optimal:
