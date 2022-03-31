@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import glob
 
+from communication import LanguageSampler
 from convergence import get_accuracy, n_sample_converged
 from noga.tools import DKL, MI
 from som import SelfOrganisingMap, sample_range
@@ -45,54 +46,103 @@ def convergence(arr, window=20, threshold=0.005):
 
 if __name__ == '__main__':
     seed = 42
-    path = os.path.join("output", "som", f"{seed}", "lang")
-    lid = int(sys.argv[1]) if len(sys.argv) > 1 else 2
-    if not os.path.exists(os.path.join(path, "processed")):
-        os.mkdir(os.path.join(path, "processed"))
+    ce = True
+    if not ce:
+        path = os.path.join("output", "som", f"{seed}", "lang")
+        lid = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+        if not os.path.exists(os.path.join(path, "processed")):
+            os.mkdir(os.path.join(path, "processed"))
 
-    som = SelfOrganisingMap()
-    data = som.term_data
-    data = data[~pd.isna(data["word"])]
+        som = SelfOrganisingMap()
+        data = som.term_data
+        data = data[~pd.isna(data["word"])]
 
-    print(f"Processing Language {lid}")
-    lid_folder = os.path.join(path, str(lid))
-    results = pd.DataFrame()
+        print(f"Processing Language {lid}")
+        lid_folder = os.path.join(path, str(lid))
+        results = pd.DataFrame()
 
-    ps = 0.9 * som.ps[lid] + 0.1 * som.ps_universal
-    pts = som.pts[lid]
-    data = data[data["language"] == lid]
+        ps = 0.9 * som.ps[lid] + 0.1 * som.ps_universal
+        pts = som.pts[lid]
+        data = data[data["language"] == lid]
 
-    samples = sorted(glob.glob(os.path.join(lid_folder, "*_all.npy")),
-                     key=lambda x: int(x.split(os.sep)[-1].split("_")[0]))
-    for i, sample_file in enumerate(samples):
-        print(f"Processing {sample_file}")
+        samples = sorted(glob.glob(os.path.join(lid_folder, "*_all.npy")),
+                         key=lambda x: int(x.split(os.sep)[-1].split("_")[0]))
+        for i, sample_file in enumerate(samples):
+            print(f"Processing {sample_file}")
 
-        n_samples = int(sample_file.split(os.sep)[-1].split("_")[0])
-        p_t_s_arr = np.load(sample_file)
-        average_k = len(p_t_s_arr)
-        results_dict = {}
+            n_samples = int(sample_file.split(os.sep)[-1].split("_")[0])
+            p_t_s_arr = np.load(sample_file)
+            average_k = len(p_t_s_arr)
+            results_dict = {}
 
-        # Calculate scores
-        inf_losses, mutual_infs = score(p_t_s_arr, pts, ps)
-        results_dict.update({
-            "information_loss": inf_losses,
-            "mutual_information": mutual_infs,
-        })
+            # Calculate scores
+            inf_losses, mutual_infs = score(p_t_s_arr, pts, ps)
+            results_dict.update({
+                "information_loss": inf_losses,
+                "mutual_information": mutual_infs,
+            })
 
-        # Calculate convergence
-        accs = accuracy(p_t_s_arr, lid, som, data)
-        results_dict.update({"accuracy": accs})
+            # Calculate convergence
+            accs = accuracy(p_t_s_arr, lid, som, data)
+            results_dict.update({"accuracy": accs})
 
-        results_dict.update({
-            "language": [lid] * average_k,
-            "n_samples": [n_samples] * average_k,
-            "average_k": list(range(average_k))
-        })
+            results_dict.update({
+                "language": [lid] * average_k,
+                "n_samples": [n_samples] * average_k,
+                "average_k": list(range(average_k))
+            })
 
-        results = results.append(pd.DataFrame.from_dict(results_dict), ignore_index=True)
+            results = results.append(pd.DataFrame.from_dict(results_dict), ignore_index=True)
 
-    # Get point of convergence
-    accs = np.array([results.groupby("average_k")["accuracy"].get_group(j) for j in range(average_k)])
-    n_conv = convergence(accs)
-    results["n_convergence"] = n_conv * (len(results) // len(n_conv))
-    results.to_csv(os.path.join(path, "processed", f"{lid}.csv"))
+        # Get point of convergence
+        accs = np.array([results.groupby("average_k")["accuracy"].get_group(j) for j in range(average_k)])
+        n_conv = convergence(accs)
+        results["n_convergence"] = n_conv * (len(results) // len(n_conv))
+        results.to_csv(os.path.join(path, "processed", f"{lid}.csv"))
+    else:
+        path = os.path.join("output", "som", f"{seed}", "ce")
+        folders = sorted(glob.glob(os.path.join(path, "*")), key=lambda x: float(x.split(os.sep)[-1]))
+        if not os.path.exists(os.path.join(path, "processed")):
+            os.mkdir(os.path.join(path, "processed"))
+        betas = [float(x.split(os.sep)[-1]) for x in folders]
+        beta = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+        beta = betas[beta]
+
+        som = SelfOrganisingMap()
+
+        print(f"Processing Language {beta}")
+        lid_folder = os.path.join(path, str(beta))
+        results = pd.DataFrame()
+
+        mx = glob.glob(os.path.join("frontier", "q_matrices", f"{beta}*"))[0]
+        sampler = LanguageSampler(mx)
+
+        ps = som.ps_universal
+        pts = sampler.prob_matrix.T
+
+        samples = sorted(glob.glob(os.path.join(lid_folder, "*_all.npy")),
+                         key=lambda x: int(x.split(os.sep)[-1].split("_")[0]))
+        for i, sample_file in enumerate(samples):
+            print(f"Processing {sample_file}")
+
+            n_samples = int(sample_file.split(os.sep)[-1].split("_")[0])
+            p_t_s_arr = np.load(sample_file)
+            average_k = len(p_t_s_arr)
+            results_dict = {}
+
+            # Calculate scores
+            inf_losses, mutual_infs = score(p_t_s_arr, pts, ps)
+            results_dict.update({
+                "information_loss": inf_losses,
+                "mutual_information": mutual_infs,
+            })
+
+            results_dict.update({
+                "language": [beta] * average_k,
+                "n_samples": [n_samples] * average_k,
+                "average_k": list(range(average_k))
+            })
+
+            results = results.append(pd.DataFrame.from_dict(results_dict), ignore_index=True)
+
+        results.to_csv(os.path.join(path, "processed", f"{beta}.csv"))
