@@ -45,7 +45,7 @@ def convergence(arr, window=20, threshold=0.005):
 
 if __name__ == '__main__':
     seed = 42
-    path = os.path.join("output", "som", f"{seed}")
+    path = os.path.join("output", "som", f"{seed}", "lang")
     lid = int(sys.argv[1]) if len(sys.argv) > 1 else 2
     if not os.path.exists(os.path.join(path, "processed")):
         os.mkdir(os.path.join(path, "processed"))
@@ -92,8 +92,7 @@ if __name__ == '__main__':
         results = results.append(pd.DataFrame.from_dict(results_dict), ignore_index=True)
 
     # Get point of convergence
-    results = pd.read_csv(f"output/som/42/processed/{i}.csv", index_col=0)
-    accs = np.array([results.groupby("average_k")["accuracy"].get_group(j) for j in range(50)])
-    n_conv = convergence(accs, threshold=0.03)
+    accs = np.array([results.groupby("average_k")["accuracy"].get_group(j) for j in range(average_k)])
+    n_conv = convergence(accs)
     results["n_convergence"] = n_conv * (len(results) // len(n_conv))
     results.to_csv(os.path.join(path, "processed", f"{lid}.csv"))
