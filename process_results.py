@@ -102,8 +102,6 @@ if __name__ == '__main__':
     else:
         path = os.path.join("output", "som", f"{seed}", "ce")
         folders = sorted(glob.glob(os.path.join(path, "*")), key=lambda x: float(x.split(os.sep)[-1]))
-        if not os.path.exists(os.path.join(path, "processed")):
-            os.mkdir(os.path.join(path, "processed"))
         betas = [float(x.split(os.sep)[-1]) for x in folders]
         beta = int(sys.argv[1]) if len(sys.argv) > 1 else 0
         beta = betas[beta]
@@ -145,4 +143,6 @@ if __name__ == '__main__':
 
             results = results.append(pd.DataFrame.from_dict(results_dict), ignore_index=True)
 
+        if not os.path.exists(os.path.join(path, "processed")):
+            os.mkdir(os.path.join(path, "processed"))
         results.to_csv(os.path.join(path, "processed", f"{beta}.csv"))
