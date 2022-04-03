@@ -42,7 +42,7 @@ class SelfOrganisingMap:
 
     def __init__(
             self,
-            size: int = 12,
+            size: int = 13,
             alpha: float = 0.1,
             sigma: float = 5.0,
             term_weight: float = 0.025,
