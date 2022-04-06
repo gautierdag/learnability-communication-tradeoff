@@ -400,9 +400,7 @@ class SelfOrganisingMap:
         else:
             scores = {lid: [] for lid in self.models}
 
-        for lid, data in tqdm(
-                self.term_data.groupby("language"), desc="Learning colours"
-        ):
+        for lid, data in self.term_data.groupby("language"):
             if language_ids is not None and lid not in language_ids:
                 continue
             size = self.term_size[lid]
@@ -444,7 +442,7 @@ class SelfOrganisingMap:
             ps_l = 0.9 * self.ps[language_id] + 0.1 * self.ps_universal
         else:
             ps_l = self.ps_universal
-        for i, sample in tqdm(enumerate(zip(*samples), 1), desc=f"Language {language_id}"):
+        for i, sample in enumerate(zip(*samples), 1):
             x = self.get_features(sample, n_words)
             self.forward(m, x)
             self.adjust_hyperparams()
