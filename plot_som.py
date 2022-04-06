@@ -17,9 +17,9 @@ animate = False
 lids = [1,2,3,4]  # range(1, 111)
 seed = 42
 
-
+path = f"output/som/{seed}/lang"
 som = SelfOrganisingMap()
-scores_dict = pickle.load(open(f"output/som/{seed}/scores_dict.p", "rb"))
+scores_dict = pickle.load(open(os.path.join(path, "scores_dict.p"), "rb"))
 prop_cycle = plt.rcParams["axes.prop_cycle"]
 colors = prop_cycle.by_key()["color"]
 lang_strs = pd.read_csv("wcs/lang.txt", sep="\t", usecols=[0, 1],
@@ -35,7 +35,7 @@ plt.title("Optimal learning curves")
 plt.xlabel("Complexity; $I(H, C)$ bits")
 plt.ylabel("Information Loss; KL-Divergence bits")
 fig.tight_layout()
-fig.savefig(f"output/som/optimal_curves.pdf")
+fig.savefig(os.path.join(path, "optimal_curves.pdf"))
 plt.show()
 
 # Plot number of time steps vs information loss
@@ -51,7 +51,7 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
                      color=colors[i % len(colors)], alpha=0.2)
 plt.legend()
 fig.tight_layout()
-fig.savefig(f"output/som/{seed}/sample_inf_loss.pdf")
+fig.savefig(os.path.join(path, "sample_inf_loss.pdf"))
 plt.show()
 
 # Plot number of time steps vs complexity
@@ -68,7 +68,7 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
                      color=colors[i % len(colors)], alpha=0.2)
 plt.legend()
 fig.tight_layout()
-fig.savefig(f"output/som/{seed}/sample_complexity.pdf")
+fig.savefig(os.path.join(path, "sample_complexity.pdf"))
 plt.show()
 
 # Plot all selected LIDs on one plot without animation
@@ -106,7 +106,7 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
     labels.append(f"{lang_strs.loc[lid, 'language']} ({som.term_size[lid]})")
 plt.legend(handles, labels)
 fig.tight_layout()
-fig.savefig(f"output/som/{seed}/learning_trajectories.pdf")
+fig.savefig(os.path.join(path, "learning_trajectories.pdf"))
 plt.show()
 
 # Plot averaged learning trajectories
@@ -156,7 +156,7 @@ for i, (lid, scores) in enumerate(scores_dict.items()):
             artists.append([q, s])
         anim = ArtistAnimation(fig, artists, blit=True)
         fig.tight_layout()
-        anim.save(f'output/som/{seed}/{lid}/learning_traj_{lid}.gif', dpi=300)
+        anim.save(os.path.join(path, f"{lid}", f"learning_traj_{lid}.gif"), dpi=300)
 
     plt.show()
 
@@ -189,7 +189,7 @@ if animate:
             mode_maps.append(image_from_plot)
             fig.savefig(f"output/som/{seed}/{lid}/mode_maps/{j:03}.jpg")
 
-        fp_in = f"output/som/{seed}/{lid}/mode_maps/*.jpg"
-        fp_out = f"output/som/{seed}/{lid}/mode_map_{lid}.gif"
+        fp_in = os.path.join(path, f"{lid}", "mode_maps/*.jpg")
+        fp_out = os.path.join(path, f"{lid}", f"mode_map_{lid}.gif")
         images = list(map(lambda filename: imageio.imread(filename), sorted(glob.glob(fp_in))))
         imageio.mimsave(os.path.join(fp_out), images, duration=0.25)

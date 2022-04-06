@@ -42,7 +42,7 @@ class SelfOrganisingMap:
 
     def __init__(
             self,
-            size: int = 12,
+            size: int = 13,
             alpha: float = 0.1,
             sigma: float = 5.0,
             term_weight: float = 0.025,
@@ -50,6 +50,7 @@ class SelfOrganisingMap:
             features: str = "perc",
             sampling: str = "corpus",
             color_prior: str = "capacity",
+            subopt: bool = False
     ):
         """Initialise a new self-organising map.
 
@@ -62,6 +63,7 @@ class SelfOrganisingMap:
             features: Type of semantic features to use. Either 'perc' or 'xling'
             sampling: Estimation method for p(t). Either unif or rel_freq
             color_prior: Optional semantic space (colour) prior
+            subopt: Whether to train on the worst CE-suboptimal shifted sampling distribution.
         """
         assert size > 0, "Matrix size must be larger than 0."
         assert 0 < alpha < 1, "Learning rate alpha must be between 0 and 1."
@@ -81,6 +83,7 @@ class SelfOrganisingMap:
         self.features = features
         self.sampling = sampling
         self.color_prior = color_prior
+        self.suboptimal = None if not subopt else pickle.load(open("worst_qs_rotated.p", "rb"))
 
         # Load the data
         self.wcs_path = wcs_path
@@ -225,8 +228,12 @@ class SelfOrganisingMap:
                 pt /= pt.sum()
             elif self.sampling == "uniform":
                 pt = 1 / size
-            dists[lid] = ps_t * pt[:, None]
+            dist = ps_t * pt[:, None]
+            if self.suboptimal is not None:
+                dist = dist[:, self.suboptimal[lid]["rotation_indices"]]
+            dists[lid] = dist
         self.pts = dists
+
         return self.pts
 
     def get_term_distribution(self):
@@ -552,6 +559,8 @@ if __name__ == "__main__":
     parser.add_argument("--workers", type=int, default=None, help="If given, then use multiprocessing with "
                                                                   "given number of workers.")
     parser.add_argument("--lid", type=int, default=None, help="ID of language to learn.")
+    parser.add_argument("--subopt", action="store_true", default=False, help="Whether to learn on the shifted sampling"
+                                                                             "distributions. ")
 
     args = parser.parse_args()
     print(args)
@@ -597,7 +606,7 @@ if __name__ == "__main__":
             scores, models = list(zip(*scores_models))
         else:
             for k in trange(args.average_k):
-                som = SelfOrganisingMap(**som_args)
+                som = SelfOrganisingMap(subopt=args.subopt, **som_args)
                 scores_dict = som.learn_languages(
                     sample_range[-1],
                     scoring_steps=sample_range,
