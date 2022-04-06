@@ -9,7 +9,6 @@ from numpy.lib.stride_tricks import sliding_window_view
 from pathlib import Path
 import argparse
 import numpy as np
-import os
 import glob
 
 import pandas as pd
@@ -75,7 +74,7 @@ def n_sample_converged(
 
         # calculate rmsd
         error = v - v.mean(1)[:, None]
-        rmsd = np.sqrt((error ** 2).sum(1) / (window - 1))
+        rmsd = np.sqrt((error ** 2).sum(1) / (window - 1))  # @Balint Question why -1?
 
         idx = np.argmax(rmsd < threshold)
         if idx == 0 and not (rmsd < threshold).any():
