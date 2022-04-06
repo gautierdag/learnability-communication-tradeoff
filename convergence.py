@@ -13,11 +13,14 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-def get_accuracy(p_t_s: np.ndarray, lid: int, som: SelfOrganisingMap, language: pd.DataFrame):
+def get_accuracy(p_t_s: np.ndarray, lid: int, som: SelfOrganisingMap, language: pd.DataFrame, source: np.ndarray=None):
     correct = 0
     ts = np.argmax(p_t_s, axis=1)
+    source_modes = np.argmax(source, axis=1)
     for cid, chip in language.groupby("chip"):
-        if ts[cid - 1] == som.word_map[lid].inverse[chip['word'].mode()[0]]:
+        if source is not None and ts[cid-1] = source_modes[cid-1]:
+            correct += 1
+        elif ts[cid - 1] == som.word_map[lid].inverse[chip['word'].mode()[0]]:
             correct += 1
     return correct / NUM_CHIPS
 
@@ -27,9 +30,11 @@ def evaluate_convergence(
         data: pd.DataFrame,
         num_samples: int,
         prefix: str,
-        language_ids: List[int] = None
+        language_ids: List[int] = None,
+        use_source: bool = False
 ) -> Dict[int, List[float]]:
     p_t_s = {}
+    source = {}
 
     if language_ids is None:
         lids = range(1, som.term_data.nunique()['language'] + 1)
@@ -42,7 +47,14 @@ def evaluate_convergence(
         except OSError:
             print(os.path.join(prefix, f'{lid}/{num_samples}_pt_s.npy'))
             print(f'Error: no p(t|s) file found for language {lid}', file=sys.stderr)
-            exit(1)
+            continue
+        if use_source:
+            try:
+                # Should have shape (K,330,W) where K is the number of averaging runs
+                source[lid] = np.load(os.path.join(prefix, f'{lid}/source.npy'))
+            except OSError:
+                print(f'Error: no source file found for language {lid}', file=sys.stderr)
+                continue
 
     return evaluate_convergence_model(som, data, p_t_s=p_t_s)
 
@@ -50,12 +62,17 @@ def evaluate_convergence(
 def evaluate_convergence_model(
         som: SelfOrganisingMap,
         data: pd.DataFrame,
-        p_t_s: Dict[int, np.ndarray] = None
+        p_t_s: Dict[int, np.ndarray] = None,
+        source: Dict[int, np.ndarray] = None
 ) -> Dict[int, List[float]]:
     accs = defaultdict(list)
     for lid, language in data.groupby("language"):
         for p in p_t_s[lid]:
-            accs[lid].append(get_accuracy(p, lid, som, language))
+            try:
+                s = source[lid]
+            except KeyError:
+                s = None
+            accs[lid].append(get_accuracy(p, lid, som, language, source[lid]))
     return accs
 
 
@@ -90,6 +107,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_samples", type=int, default=None, nargs='+',
                         help="Number of samples after which to evaluate")
     parser.add_argument("--lids", type=int, default=None, nargs='*', help="IDs of languages on which to evaluate")
+    parser.add_argument("--use_source", default=False, action='store_true', help="If set, use source.npy to compute convergence. Otherwise, compute from WCS.")
     parser.add_argument("--prefix", type=str, default='output/som', help="Prefix of path to SOM scores")
     parser.add_argument("--plot", default=False, action='store_true', help="Produces a plot of the results.")
     parser.add_argument("--window", default=20, type=int, help="Sliding window for checking convergence")
