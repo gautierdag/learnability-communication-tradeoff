@@ -4,7 +4,6 @@ import pickle
 
 from som import SelfOrganisingMap, NUM_CHIPS
 from typing import List, Dict
-from numpy.lib.stride_tricks import sliding_window_view
 
 from pathlib import Path
 import argparse
@@ -45,42 +44,41 @@ def evaluate_convergence(
 
 
 def n_sample_converged(
-    window: int,
-    threshold: float,
     accuracies: Dict[str, Dict[int, List[float]]],
-) -> Dict[int, int]:
-    """Find the number of samples where the SOM has converged.
+    patience: int = 50,
+    threshold: float = 0.01,
+) -> Dict[str, List[int]]:
+    """Does simple Early Stopping to find where the SOM has converged for every language and every seed
 
     Args:
-        window: Sliding window for convergence calculation
-        threshold: What p-value to accept for convergence
+        patience: time to wait between checkpoint before deciding that the SOM has converged
+        threshold: What minimum accuracy increase to consider as improvement (default, 1%)
         accuracies: Accuracies dictionary {lid: {iteration_number: accuracy}}
     """
     lid_conv = {}
-    for lid, accuracy_dict in tqdm(accuracies.items()):
+    lids = list(sorted(accuracies))
+    for lid in tqdm(lids):
+        accuracy_dict = accuracies[lid]
         sorted_iterations = list(sorted(accuracy_dict))
 
-        w = []
-        for i in sorted_iterations:
-            w.append(accuracy_dict[i])
-        # W is a NxK matrix
-        w = np.array(w)
+        idxs = []
+        K = len(accuracy_dict[1])
+        for seed in range(K):
+            best = 0
+            best_iteration = 1
+            waiting = 0
+            for j in sorted_iterations:
+                if best + threshold < accuracy_dict[j][seed]:
+                    best = accuracy_dict[j][seed]
+                    best_iteration = j
+                    waiting = 0
+                if waiting == patience:
+                    break
+                waiting += 1
 
-        # using a sliding window in the N axis, V is (N-W)xKxW
-        v = sliding_window_view(w, window, axis=0)
-
-        # apply avg pooling on window
-        v = v.mean(-1)
-
-        # calculate rmsd
-        error = v - v.mean(1)[:, None]
-        rmsd = np.sqrt((error ** 2).sum(1) / (window - 1))  # @Balint Question why -1?
-
-        idx = np.argmax(rmsd < threshold)
-        if idx == 0 and not (rmsd < threshold).any():
-            lid_conv[lid] = sorted_iterations[-1]
-        else:
-            lid_conv[lid] = sorted_iterations[idx]
+            idxs.append(best_iteration)
+        idxs = np.array(idxs)
+        lid_conv[lid] = idxs
     return lid_conv
 
 
@@ -97,21 +95,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Produces a plot of the results.",
     )
-    parser.add_argument(
-        "--window", default=20, type=int, help="Sliding window for checking convergence"
-    )
-    parser.add_argument(
-        "--threshold",
-        default=0.01,
-        type=float,
-        help="P-value threshold check for t-test.",
-    )
-
     args = parser.parse_args()
 
     som = SelfOrganisingMap()
 
-    files = glob.glob("{args.prefix}/*/*/*_pt_s_all.npy")
+    files = glob.glob(f"{args.prefix}/*/*/*_pt_s_all.npy")
     print(f"Found {len(files)} files.")
 
     results = pd.DataFrame(columns=["language", "n_samples", "accuracy"])
@@ -136,21 +124,16 @@ if __name__ == "__main__":
         n_samples += [n] * len(accs)
 
     pickle.dump(dict(accuracies), open("accuracies.pkl", "wb"))
-    n_conv = n_sample_converged(args.window, args.threshold, dict(accuracies))
-
-    print(n_conv)
+    n_conv = n_sample_converged(dict(accuracies))
     pickle.dump(dict(n_conv), open("n_conv.pkl", "wb"))
 
     if args.plot:
         results = pd.DataFrame(
             {"n_samples": n_samples, "language": lids, "accuracy": accuracy_df}
         )
-
         plt.ylim((0, 1))
         sns.set_theme()
         sns.lineplot(x="n_samples", y="accuracy", hue="language", data=results)
-
         for lid, cn in n_conv.items():
-            plt.axvline(cn, linestyle="--")
-
+            plt.axvline(np.median(cn), linestyle="--")
         plt.show()
