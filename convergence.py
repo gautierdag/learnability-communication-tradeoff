@@ -1,139 +1,139 @@
 from collections import defaultdict
+from tqdm import tqdm
+import pickle
 
-from som import SelfOrganisingMap, NUM_CHIPS, sample_range
-from typing import List, Dict, Tuple
-from scipy.stats import ttest_1samp
+from som import SelfOrganisingMap, NUM_CHIPS
+from typing import List, Dict
+
+from pathlib import Path
 import argparse
 import numpy as np
-import os
-import sys
+import glob
+
 import pandas as pd
 
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-def get_accuracy(p_t_s: np.ndarray, lid: int, som: SelfOrganisingMap, language: pd.DataFrame):
+def get_accuracy(
+    p_t_s: np.ndarray,
+    source: np.ndarray = None,
+):
     correct = 0
     ts = np.argmax(p_t_s, axis=1)
-    for cid, chip in language.groupby("chip"):
-        if ts[cid - 1] == som.word_map[lid].inverse[chip['word'].mode()[0]]:
+    source_modes = np.argmax(source, axis=1)
+    for cid in range(NUM_CHIPS):
+        if ts[cid] == source_modes[cid]:
             correct += 1
     return correct / NUM_CHIPS
 
 
 def evaluate_convergence(
-        som: SelfOrganisingMap,
-        data: pd.DataFrame,
-        num_samples: int,
-        prefix: str,
-        language_ids: List[int] = None
+    file: str,
 ) -> Dict[int, List[float]]:
-    p_t_s = {}
-
-    if language_ids is None:
-        lids = range(1, som.term_data.nunique()['language'] + 1)
-    else:
-        lids = language_ids
-    for lid in lids:
-        try:
-            # Should have shape (K,330,W) where K is the number of averaging runs
-            p_t_s[lid] = np.load(os.path.join(prefix, f'{lid}/{num_samples}_pt_s_all.npy'))
-        except OSError:
-            print(os.path.join(prefix, f'{lid}/{num_samples}_pt_s.npy'))
-            print(f'Error: no p(t|s) file found for language {lid}', file=sys.stderr)
-            exit(1)
-
-    return evaluate_convergence_model(som, data, p_t_s=p_t_s)
+    # Should have shape (K,330,W) where K is the number of averaging runs
+    p_t_s = np.load(file)
+    # Should have shape (330,W)
+    source = np.load(Path(file).parent / "source.npy")
+    K = p_t_s.shape[0]
+    accuracies = []
+    for k in range(K):
+        accuracies.append(get_accuracy(p_t_s[k], source))
+    return accuracies
 
 
-def evaluate_convergence_model(
-        som: SelfOrganisingMap,
-        data: pd.DataFrame,
-        p_t_s: Dict[int, np.ndarray] = None
-) -> Dict[int, List[float]]:
-    accs = defaultdict(list)
-    for lid, language in data.groupby("language"):
-        for p in p_t_s[lid]:
-            accs[lid].append(get_accuracy(p, lid, som, language))
-    return accs
-
-
-def n_sample_converged(window: int,
-                       threshold: float,
-                       accuracies: Dict[int, Dict[int, List[float]]],
-                       language_ids: List[int]) -> Dict[int, int]:
-    """ Find the number of samples where the SOM has converged.
+def n_sample_converged(
+    accuracies: Dict[str, Dict[int, List[float]]],
+    patience: int = 50,
+    threshold: float = 0.01,
+) -> Dict[str, List[int]]:
+    """Does simple Early Stopping to find where the SOM has converged for every language and every seed
 
     Args:
-        window: Sliding window for convergence calculation
-        threshold: What p-value to accept for convergence
-        accuracies: Accuracies for the language at sampling steps
-        language_ids: IDs for languages to test
+        patience: time to wait between checkpoint before deciding that the SOM has converged
+        threshold: What minimum accuracy increase to consider as improvement (default, 1%)
+        accuracies: Accuracies dictionary {lid: {iteration_number: accuracy}}
     """
-    lid_conv = {lid: list(sorted(accuracies))[-1] for lid in language_ids}
-    for lid in language_ids:
-        for i in np.arange(len(accuracies) - window):
-            w = np.array([acc[lid] for j, (n, acc) in enumerate(accuracies.items()) if i <= j < i + window])
-            w = w.mean(1)
-            error = w - w.mean()
-            rmsd = np.sqrt(np.dot(error, error) / (window - 1))
-            if rmsd < threshold:
-                lid_conv[lid] = sample_range[i]
-                break
+    lid_conv = {}
+    lids = list(sorted(accuracies))
+    for lid in tqdm(lids):
+        accuracy_dict = accuracies[lid]
+        sorted_iterations = list(sorted(accuracy_dict))
+
+        idxs = []
+        K = len(accuracy_dict[1])
+        for seed in range(K):
+            best = 0
+            best_iteration = 1
+            waiting = 0
+            for j in sorted_iterations:
+                if best + threshold < accuracy_dict[j][seed]:
+                    best = accuracy_dict[j][seed]
+                    best_iteration = j
+                    waiting = 0
+                if waiting == patience:
+                    break
+                waiting += 1
+
+            idxs.append(best_iteration)
+        idxs = np.array(idxs)
+        lid_conv[lid] = idxs
     return lid_conv
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate convergence of learning to WCS data")
-    parser.add_argument("--seed", type=int, default=42, help="random seed")
-    parser.add_argument("--n_samples", type=int, default=None, nargs='+',
-                        help="Number of samples after which to evaluate")
-    parser.add_argument("--lids", type=int, default=None, nargs='*', help="IDs of languages on which to evaluate")
-    parser.add_argument("--prefix", type=str, default='output/som', help="Prefix of path to SOM scores")
-    parser.add_argument("--plot", default=False, action='store_true', help="Produces a plot of the results.")
-    parser.add_argument("--window", default=20, type=int, help="Sliding window for checking convergence")
-    parser.add_argument("--threshold", default=0.01, type=float, help="P-value threshold check for t-test.")
-
+    parser = argparse.ArgumentParser(
+        description="Evaluate convergence of learning to WCS data"
+    )
+    parser.add_argument(
+        "--prefix", type=str, default="lc_data", help="Prefix of path to SOM scores"
+    )
+    parser.add_argument(
+        "--plot",
+        default=False,
+        action="store_true",
+        help="Produces a plot of the results.",
+    )
     args = parser.parse_args()
 
     som = SelfOrganisingMap()
-    data = som.term_data
-    if args.lids is not None:
-        data = data[data["language"].isin(args.lids)]
-    data = data[~pd.isna(data["word"])]
 
-    results = pd.DataFrame(columns=['language', 'n_samples', 'accuracy'])
-    ns = args.n_samples
-    if ns is None:
-        ns = sample_range
+    files = glob.glob(f"{args.prefix}/*/*/*_pt_s_all.npy")
+    print(f"Found {len(files)} files.")
 
-    accuracies = {}
-    for n in ns:
-        print(f'Evaluating on {n} samples.', file=sys.stderr)
-        accs = evaluate_convergence(som, data, n, os.path.join(args.prefix, str(args.seed)), language_ids=args.lids)
-        accuracies[n] = accs
-        df_dict = {}
-        for lid, a in accs.items():
-            df_dict["language"] = [lid] * len(a)
-            df_dict["accuracy"] = a
-            df_dict["n_samples"] = [n] * len(a)
+    results = pd.DataFrame(columns=["language", "n_samples", "accuracy"])
 
-        results = results.append(
-            pd.DataFrame.from_dict(df_dict),
-            ignore_index=True
-        )
+    accuracies = defaultdict(dict)
+    lids = []
+    accuracy_df = []
+    n_samples = []
 
-    n_conv = n_sample_converged(args.window, args.threshold, accuracies, args.lids)
+    for file in tqdm(files):
+        # print(f"Evaluating on {n} samples.", file=sys.stderr)
+        run_type = file.split("/")[-3]
+        if run_type == "worst_qs":
+            continue
+        accs = evaluate_convergence(file)
+        n = int(Path(file).stem.split("_")[0])
+        lid = run_type + "_" + file.split("/")[-2]
+        accuracies[lid][n] = accs
+
+        accuracy_df += accs
+        lids += [lid] * len(accs)
+        n_samples += [n] * len(accs)
+
+    pickle.dump(dict(accuracies), open("accuracies.pkl", "wb"))
+    n_conv = n_sample_converged(dict(accuracies))
+    pickle.dump(dict(n_conv), open("n_conv.pkl", "wb"))
 
     if args.plot:
+        results = pd.DataFrame(
+            {"n_samples": n_samples, "language": lids, "accuracy": accuracy_df}
+        )
         plt.ylim((0, 1))
         sns.set_theme()
-        sns.lineplot(x="n_samples", y="accuracy",
-                     hue="language",
-                     data=results)
-
+        sns.lineplot(x="n_samples", y="accuracy", hue="language", data=results)
         for lid, cn in n_conv.items():
-            plt.axvline(cn, linestyle="--")
-
+            plt.axvline(np.median(cn), linestyle="--")
         plt.show()
