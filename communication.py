@@ -203,6 +203,7 @@ if __name__ == "__main__":
     parser.add_argument("--optimal", action="store_true", default=False,
                         help="Whether to use CE-optimal or suboptimal languages.")
     parser.add_argument("--i", type=int, default=None, help="Select a particular beta by index. ")
+    parser.add_argument("--beta", type=float, default=None, help="Beta-value to use for training. ")
 
     args = parser.parse_args()
 
@@ -220,6 +221,7 @@ if __name__ == "__main__":
         files = glob.glob(os.path.join("output", "worst_qs", "*"))
 
     files = sorted(files, key=lambda x: float(x.split(os.sep)[-1].split("_")[0]))
+    existing_betas = [float(d.split(os.sep)[-1]) for d in set(glob.glob(f"output/som/{seed}/ce/*")) - {f"output/som/{seed}/ce/processed"}]
 
     betas = {}
     num_words = {}
@@ -238,13 +240,19 @@ if __name__ == "__main__":
         sampler = LanguageSampler(f)
         num_words[i] = sampler.num_words
 
-        if prev_num_words > 0 and num_words[i] <= prev_num_words + 2:
+        if args.beta is not None:
+            if beta != args.beta:
+                continue
+        elif len(existing_betas) == 0:
+            if prev_num_words > 0 and num_words[i] <= prev_num_words + 2:
+                prev_num_words = num_words[i]
+                continue
             prev_num_words = num_words[i]
-            continue
-        prev_num_words = num_words[i]
-
-        if args.i is not None and i != args.i:
-            continue
+            if args.i is not None and i != args.i:
+                continue
+        else:
+            if beta in existing_betas:
+                continue
 
         print(i, f, num_words[i])
 
