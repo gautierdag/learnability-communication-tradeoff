@@ -101,8 +101,8 @@ if __name__ == '__main__':
         results.to_csv(os.path.join(path, "processed", f"{lid}.csv"))
     else:
         path = os.path.join("output", "som", f"{seed}", "ce")
-        folders = sorted(glob.glob(os.path.join(path, "*")), key=lambda x: float(x.split(os.sep)[-1]))
-        betas = [float(x.split(os.sep)[-1]) for x in folders]
+        # folders = sorted(glob.glob(os.path.join(path, "*")), key=lambda x: float(x.split(os.sep)[-1]))
+        betas = [1.0942937012608183, 1.2226402776921537, 1.4439291955225915, 1.7171308728756145, 11.79415373832906] #[float(x.split(os.sep)[-1]) for x in folders]
         beta = int(sys.argv[1]) if len(sys.argv) > 1 else 0
         beta = betas[beta]
 
