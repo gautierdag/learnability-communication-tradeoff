@@ -50,7 +50,9 @@ class SelfOrganisingMap:
             features: str = "perc",
             sampling: str = "corpus",
             color_prior: str = "capacity",
-            subopt: bool = False
+            subopt: bool = False,
+            term_dist: str = "corpus",
+            model_init: str = "zeros"
     ):
         """Initialise a new self-organising map.
 
@@ -70,8 +72,10 @@ class SelfOrganisingMap:
         assert 0 < sigma, "Neighbourhood radius must be positive."
         assert 0 < term_weight <= 1, "Term importance must be in (0,1]."
         assert features in ["perc", "xling"], "Invalid feature type given."
-        assert sampling in ["corpus", "uniform"], "Invalid estimation type for p(t)."
-        assert color_prior in ["uniform", "capacity"], f"Invalid color prior specified."
+        assert sampling in ["corpus", "uniform", "english"], "Invalid estimation type for p(t)."
+        assert color_prior in ["uniform", "capacity", "english"], f"Invalid color prior specified."
+        assert term_dist in ["corpus", "uniform", "english"], f"Invalid term distribution type."
+        assert model_init in ["zeros", "runiform", "rint"], f"Invalid model initialisation type given."
 
         self.size = size
         self.alpha = alpha
@@ -83,6 +87,7 @@ class SelfOrganisingMap:
         self.features = features
         self.sampling = sampling
         self.color_prior = color_prior
+        self.term_distribution = term_dist
         self.suboptimal = None if not subopt else pickle.load(open("worst_qs_rotated.p", "rb"))
 
         # Load the data
@@ -114,16 +119,11 @@ class SelfOrganisingMap:
             for lid, data in self.term_data.groupby("language")
         }
         self.sem_size = self.sem_data.shape[1]
-        self.models = {
-            lid: np.zeros(
-                (
-                    self.size,
-                    self.size,
-                    self.term_size[lid] + self.distance_matrix.shape[0],
-                )
-            )
-            for lid, _ in self.term_data.groupby("language")
-        }
+
+        # Initialise models for all languages
+        self.model_initialisation = model_init
+        self.models = None
+        self.initialise_models()
 
         # Frequentist sampling distribution
         self.word_map = defaultdict(bidict)
@@ -137,7 +137,8 @@ class SelfOrganisingMap:
         # Color prior (semantic space prior)
         self.ps = {}
         self.calculate_color_prior()
-        ps = np.array([p for lid, p in self.ps.items()])
+        ps = pickle.load(open("pickle/ps.p", "rb"))
+        ps = np.array([p for lid, p in ps.items()])
         ps = ps.sum(0) / len(ps)
         self.ps_universal = ps
 
@@ -169,6 +170,37 @@ class SelfOrganisingMap:
             self.sem_data = self.chip_to_lab
 
         self.distance_matrix = self.get_distance_matrix()
+
+    def initialise_models(self):
+        models = None
+        if self.model_initialisation == "zeros":
+            models = {
+                lid: np.zeros(
+                    (
+                        self.size,
+                        self.size,
+                        self.term_size[lid] + self.distance_matrix.shape[0],
+                    )
+                ) for lid, _ in self.term_data.groupby("language")
+            }
+        elif self.model_initialisation == "runiform":
+            models = {
+                lid: 100.0 * np.random.random(
+                    size=(
+                        self.size,
+                        self.size,
+                        self.term_size[lid] + self.distance_matrix.shape[0],
+                    )
+                ) for lid, _ in self.term_data.groupby("language")
+            }
+        elif self.model_initialisation == "rint":
+            models = {
+                lid: np.repeat(np.random.randint(self.size * self.size, size=(self.size, self.size))[..., None],
+                               repeats=self.term_size[lid] + self.distance_matrix.shape[0],
+                               axis=-1) * 1.0
+                for lid, _ in self.term_data.groupby("language")
+            }
+        self.models = models
 
     def reset_models(self):
         """ Reset every learnt model to all zeroes"""
@@ -213,6 +245,10 @@ class SelfOrganisingMap:
         """Calculate joint distribution of chips and terms from the data as p(s|t)p(t)"""
         # Calculate the sampling distribution
         dists = {}
+        en_prior = pd.DataFrame()
+        if self.sampling == "english":
+            en_prior = pd.read_csv(os.path.join(self.wcs_path, "en-prior.txt"), header=0, sep="\t")
+
         for lid, data in self.term_data.groupby("language"):
             size = self.term_size[lid]
             ps_t = np.zeros((size, NUM_CHIPS))
@@ -224,10 +260,13 @@ class SelfOrganisingMap:
                 ps_t[i, :] = s_freq / term_data.shape[0]
                 pt[i] = term_data.shape[0]
                 self.word_map[lid][i] = term
-            if self.sampling == "corpus":
+            if self.sampling == "english" and lid == 6:
+                for word, idx in self.word_map[lid].inv.items():
+                    pt[idx] = en_prior[en_prior["abbr"] == word]["prob"].item()
+            elif self.sampling == "corpus":
                 pt /= pt.sum()
-            elif self.sampling == "uniform":
-                pt = 1 / size
+            else:
+                pt = np.repeat(1 / size, size)
             dist = ps_t * pt[:, None]
             if self.suboptimal is not None:
                 dist = dist[:, self.suboptimal[lid]["rotation_indices"]]
@@ -238,8 +277,11 @@ class SelfOrganisingMap:
 
     def get_term_distribution(self):
         """Calculate the same term and chip distribution but as p(t|s)p(s)."""
-        if os.path.exists("pt_s.p"):
-            self.pt_s = pickle.load(open("pt_s.p", "rb"))
+        if self.term_distribution != "english" and os.path.exists("pickle/pt_s.p"):
+            self.pt_s = pickle.load(open("pickle/pt_s.p", "rb"))
+            return
+        elif self.term_distribution == "english" and os.path.exists("pickle/pt_s_en.p"):
+            self.pt_s = pickle.load(open("pickle/pt_s_en.p", "rb"))
             return
         dists = {}
         for lid, data in self.term_data.groupby("language"):
@@ -248,7 +290,6 @@ class SelfOrganisingMap:
             words = data["word"].unique()
             words.sort()
             pt_s = np.zeros((NUM_CHIPS, size))
-            ps = np.zeros(NUM_CHIPS)
             for i, (chip, chip_data) in enumerate(data.groupby("chip")):
                 t_freq = chip_data.groupby("word").size()
                 t_freq = t_freq.reindex(words, fill_value=0)
@@ -256,42 +297,46 @@ class SelfOrganisingMap:
                 if np.allclose(t_freq, 0.0):
                     t_freq += 1  # Add one to each word then normalise to uniform distribution
                 pt_s[i, :] = t_freq / t_freq.sum()
-                ps[i] = chip_data.shape[0]
-            if self.sampling == "corpus":
-                ps /= ps.sum()
-            elif self.sampling == "uniform":
-                ps = 1 / size
-            dists[lid] = pt_s  # * ps[:, None]
+            dists[lid] = pt_s
         self.pt_s = dists
-        pickle.dump(dists, open("pt_s.p", "wb"))
+        if self.sampling == "english":
+            pickle.dump(dists, open("pickle/pt_s_en.p", "wb"))
+        else:
+            pickle.dump(dists, open("pickle/pt_s.p", "wb"))
         return self.pt_s
 
     def calculate_color_prior(self, maxiters=1000, verbose=False):
         """Calculate capacity-inducing prior over the colour chip space."""
         if self.color_prior == "uniform":
             self.ps = {lid: np.full(NUM_CHIPS, 1 / NUM_CHIPS)[:, None] for lid in self.pts}
-        elif self.color_prior == "capacity":
-            if os.path.exists("ps.p"):
-                self.ps = pickle.load(open("ps.p", "rb"))
-                return
+        elif self.color_prior == "capacity" and os.path.exists("pickle/ps.p"):
+            self.ps = pickle.load(open("pickle/ps.p", "rb"))
+            return
+        elif self.color_prior == "english" and os.path.exists("pickle/ps_en.p"):
+            self.ps = pickle.load(open("pickle/ps_en.p", "rb"))
+            return
 
-            ps = {}
-            for lid, p_y_x in tqdm(self.pt_s.items(), desc="Calculating capacity-achieving prior"):
-                r_x = np.ones(p_y_x.shape[0]) / p_y_x.shape[0]
-                r0 = np.zeros(p_y_x.shape[0])
-                iters = 0
-                while not np.all(np.isclose(r_x, r0)) and iters < maxiters:
-                    iters += 1
-                    r0 = r_x
-                    q_xy = p_y_x * r_x[:, np.newaxis] / (p_y_x * r_x[:, np.newaxis]).sum()
-                    q_x_y = q_xy / np.sum(q_xy, axis=0, keepdims=True)
-                    r_x = np.prod(np.power(q_x_y, p_y_x), axis=1)
-                    r_x = r_x / r_x.sum()
-                    if verbose:
-                        print(iters, np.round(((r_x - r0) ** 2).sum() ** 0.5, 10))
-                ps[lid] = r_x
-            self.ps = ps[:, None]
-            pickle.dump(ps, open("ps.p", "wb"))
+        ps = {}
+        for lid, p_y_x in tqdm(self.pt_s.items(), desc="Calculating capacity-achieving prior"):
+            r_x = np.ones(p_y_x.shape[0]) / p_y_x.shape[0]
+            r0 = np.zeros(p_y_x.shape[0])
+            iters = 0
+            while not np.all(np.isclose(r_x, r0)) and iters < maxiters:
+                iters += 1
+                r0 = r_x
+                q_xy = p_y_x * r_x[:, np.newaxis] / (p_y_x * r_x[:, np.newaxis]).sum()
+                q_x_y = q_xy / np.sum(q_xy, axis=0, keepdims=True)
+                r_x = np.prod(np.power(q_x_y, p_y_x), axis=1)
+                r_x = r_x / r_x.sum()
+                if verbose:
+                    print(iters, np.round(((r_x - r0) ** 2).sum() ** 0.5, 10))
+            ps[lid] = r_x
+        ps = {k: v[:, None] for k, v in ps.items()}
+        self.ps = ps
+        if self.sampling == "english":
+            pickle.dump(ps, open("pickle/ps_en.p", "wb"))
+        else:
+            pickle.dump(ps, open("pickle/ps.p", "wb"))
 
     def forward(self, m: np.ndarray, x: np.ndarray):
         """Run a single iteration of the SOM-algorithm.
@@ -569,6 +614,10 @@ if __name__ == "__main__":
 
     # Global parameters
     seed = args.seed
+    wcs = "wcs"
+    sampling = "corpus"
+    prior = "capacity" if wcs != "wcs_en" else "english"
+    term_dist = "corpus" if wcs != "wcs_en" else "english"
     save_xling = True  # Whether to save the cross-linguistic feature space
     grid_search = False
     save_p = True
@@ -576,6 +625,8 @@ if __name__ == "__main__":
 
     if args.lid is not None:
         lids = [args.lid]
+    elif wcs == "wcs_en":
+        lids = [6]
     else:
         lids = [2, 32, 35, 108]
 
@@ -592,11 +643,20 @@ if __name__ == "__main__":
         if not os.path.exists(f"output/som/{seed}/{lid}"):
             os.mkdir(f"output/som/{seed}/{lid}")
 
-    optimal_hyper_params = pickle.load(open("grid_search_params.p", "rb"))
+    optimal_hyper_params = pickle.load(open("pickle/grid_search_params.p", "rb"))
 
     for lid in lids:
         # som_args = optimal_hyper_params[lid]
-        som_args = {}
+        som_args = {
+            "subopt": args.subopt,
+            "wcs_path": wcs,
+            "sampling": sampling,
+            "color_prior": prior,
+            "term_dist": term_dist,
+            # "size": 10,
+            # "alpha": 1e-4,
+            "model_init": "runiform"
+        }
         print(som_args)
 
         scores = []
@@ -608,7 +668,7 @@ if __name__ == "__main__":
             scores, models = list(zip(*scores_models))
         else:
             for k in trange(args.average_k):
-                som = SelfOrganisingMap(subopt=args.subopt, **som_args)
+                som = SelfOrganisingMap(**som_args)
                 scores_dict = som.learn_languages(
                     sample_range[-1],
                     scoring_steps=sample_range,

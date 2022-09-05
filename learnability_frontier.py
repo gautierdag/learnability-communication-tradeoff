@@ -129,9 +129,9 @@ def func(args):
 if __name__ == '__main__':
     alpha = 0.1  # Uniform noise level
     beta = 0.1  # Weight of the capacity achieving prior for ps
-    workers = None
+    workers = 4
     save_path = "frontier/learnability_languages/"
-    lids = [2]
+    lids = range(1, 111)
 
     if not os.path.exists("frontier"):
         os.mkdir("frontier")
