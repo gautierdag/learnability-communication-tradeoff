@@ -75,7 +75,7 @@ class SelfOrganisingMap:
         assert sampling in ["corpus", "uniform", "english"], "Invalid estimation type for p(t)."
         assert color_prior in ["uniform", "capacity", "english"], f"Invalid color prior specified."
         assert term_dist in ["corpus", "uniform", "english"], f"Invalid term distribution type."
-        assert model_init in ["zeros", "runiform", "rint"], f"Invalid model initialisation type given."
+        assert model_init in ["zeros", "runiform", "rint", "rbinary"], f"Invalid model initialisation type given."
 
         self.size = size
         self.alpha = alpha
@@ -199,6 +199,16 @@ class SelfOrganisingMap:
                                repeats=self.term_size[lid] + self.distance_matrix.shape[0],
                                axis=-1) * 1.0
                 for lid, _ in self.term_data.groupby("language")
+            }
+        elif self.model_initialisation == "rbinary":
+            models = {
+                lid: (np.random.random(
+                    size=(
+                        self.size,
+                        self.size,
+                        self.term_size[lid] + self.distance_matrix.shape[0],
+                    )
+                ) < 0.5) * 100.0 for lid, _ in self.term_data.groupby("language")
             }
         self.models = models
 
@@ -653,7 +663,7 @@ if __name__ == "__main__":
             "sampling": sampling,
             "color_prior": prior,
             "term_dist": term_dist,
-            # "size": 10,
+            # "size": 2,
             # "alpha": 1e-4,
             "model_init": "runiform"
         }
