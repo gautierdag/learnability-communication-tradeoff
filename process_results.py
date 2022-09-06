@@ -50,13 +50,16 @@ if __name__ == '__main__':
     ce = False
     suboptimal = False
     rotations = pickle.load(open("pickle/worst_qs_rotated.p", "rb"))
-    data_dir = "ablations"
+    data_dir = "ablations/uniform"
     if not ce:
         if suboptimal:
             path = os.path.join("output", "som", f"{seed}", "suboptimal")
         else:
             path = os.path.join("output", "som", f"{seed}", data_dir)
-        lid = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+        lid_in = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+        # lids = [lid_in]
+        lids = [2, 32, 35, 108]
+
         if not os.path.exists(os.path.join(path, "processed")):
             os.mkdir(os.path.join(path, "processed"))
 
@@ -64,40 +67,41 @@ if __name__ == '__main__':
                                 wcs_path="wcs_en" if data_dir == "en" else "wcs",
                                 sampling="english" if data_dir == "en" else "corpus")
 
-        print(f"Processing Language {lid}")
-        lid_folder = os.path.join(path, str(lid))
-        results = pd.DataFrame()
+        for lid in lids:
+            print(f"Processing Language {lid}")
+            lid_folder = os.path.join(path, str(lid))
+            results = pd.DataFrame()
 
-        ps = 0.9 * som.ps[lid] + 0.1 * som.ps_universal
-        if suboptimal:
-            ps = ps[rotations[lid]["rotation_indices"], :]
-        pts = som.pts[lid]
+            ps = 0.9 * som.ps[lid] + 0.1 * som.ps_universal
+            if suboptimal:
+                ps = ps[rotations[lid]["rotation_indices"], :]
+            pts = som.pts[lid]
 
-        samples = sorted(glob.glob(os.path.join(lid_folder, "*_all.npy")),
-                         key=lambda x: int(x.split(os.sep)[-1].split("_")[0]))
-        for i, sample_file in enumerate(samples):
-            print(f"Processing {sample_file}")
+            samples = sorted(glob.glob(os.path.join(lid_folder, "*_all.npy")),
+                             key=lambda x: int(x.split(os.sep)[-1].split("_")[0]))
+            for i, sample_file in enumerate(samples):
+                print(f"Processing {sample_file}")
 
-            n_samples = int(sample_file.split(os.sep)[-1].split("_")[0])
-            p_t_s_arr = np.load(sample_file)
-            average_k = len(p_t_s_arr)
-            results_dict = {}
+                n_samples = int(sample_file.split(os.sep)[-1].split("_")[0])
+                p_t_s_arr = np.load(sample_file)
+                average_k = len(p_t_s_arr)
+                results_dict = {}
 
-            # Calculate scores
-            inf_losses, mutual_infs = score(p_t_s_arr, pts, ps)
-            results_dict.update({
-                "information_loss": inf_losses,
-                "mutual_information": mutual_infs,
-            })
+                # Calculate scores
+                inf_losses, mutual_infs = score(p_t_s_arr, pts, ps)
+                results_dict.update({
+                    "information_loss": inf_losses,
+                    "mutual_information": mutual_infs,
+                })
 
-            results_dict.update({
-                "language": [lid] * average_k,
-                "n_samples": [n_samples] * average_k,
-                "average_k": list(range(average_k))
-            })
+                results_dict.update({
+                    "language": [lid] * average_k,
+                    "n_samples": [n_samples] * average_k,
+                    "average_k": list(range(average_k))
+                })
 
-            results = results.append(pd.DataFrame.from_dict(results_dict), ignore_index=True)
-        results.to_csv(os.path.join(path, "processed", f"{lid}.csv"))
+                results = results.append(pd.DataFrame.from_dict(results_dict), ignore_index=True)
+            results.to_csv(os.path.join(path, "processed", f"{lid}.csv"))
     else:
         path = os.path.join("output", "som", f"{seed}", "ce")
         # folders = sorted(glob.glob(os.path.join(path, "*")), key=lambda x: float(x.split(os.sep)[-1]))

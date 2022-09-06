@@ -22,7 +22,6 @@ plt.rc('figure', titlesize=24)  # fontsize of the figure title
 path = f"output/som/{seed}/ablations"
 opath = f"output/som/{seed}/lang"
 # som = SelfOrganisingMap()
-adict = pickle.load(open(os.path.join(path, "scores_dict.p"), "rb"))
 odict = pickle.load(open(os.path.join(opath, "scores_dict.p"), "rb"))
 prop_cycle = plt.rcParams["axes.prop_cycle"]
 colors = prop_cycle.by_key()["color"]
@@ -36,29 +35,32 @@ ax.set_xlabel(r"Complexity")
 ax.set_ylabel("Reconstructive Error")
 ax.set_title("Sampling Prior in English")
 for i, lid in enumerate(lids):
-    scores = adict[lid]
+    for j, init_type in enumerate(["integer", "uniform"]):
+        dict_path = os.path.join(path, init_type)
+        scores_dict = pickle.load(open(os.path.join(dict_path, "scores_dict.p"), "rb"))
+        scores = scores_dict[lid]
 
-    X, Y = scores[:-1, :2].T
-    U, V = np.diff(scores[:, :2], axis=0).T
-    ax.quiver(X, Y, U, V,
-              angles="xy",
-              scale_units="xy",
-              scale=1,
-              width=0.005,
-              headwidth=2,
-              color=colors[i % len(colors)],
-              )
-    ax.scatter(
-        X, Y, s=6, edgecolor="white", linewidth=0.5, color=colors[i % len(colors)]
-    )
-    ax.plot(X[0], Y[0], markersize=6, marker="x", color=colors[i % len(colors)])
+        X, Y = scores[:-1, :2].T
+        U, V = np.diff(scores[:, :2], axis=0).T
+        ax.quiver(X, Y, U, V,
+                  angles="xy",
+                  scale_units="xy",
+                  scale=1,
+                  width=0.005,
+                  headwidth=2,
+                  color=colors[j % len(colors)],
+                  )
+        ax.scatter(
+            X, Y, s=6, edgecolor="white", linewidth=0.5, color=colors[j % len(colors)]
+        )
+        ax.plot(X[0], Y[0], markersize=6, marker="x", color=colors[j % len(colors)])
 
-    handles.append(Line2D([], [],
-                          color="white",
-                          markerfacecolor=colors[i % len(colors)],
-                          marker="o",
-                          markersize=10))
-    labels.append("Random")
+        handles.append(Line2D([], [],
+                              color="white",
+                              markerfacecolor=colors[j % len(colors)],
+                              marker="o",
+                              markersize=10))
+        labels.append(init_type)
 
     scores = odict[lid]
     X, Y = scores[:-1, :2].T
@@ -69,17 +71,17 @@ for i, lid in enumerate(lids):
               scale=1,
               width=0.005,
               headwidth=2,
-              color=colors[(i+1) % len(colors)],
+              color="k",
               )
     ax.scatter(
-        X, Y, s=6, edgecolor="white", linewidth=0.5, color=colors[(i+1) % len(colors)]
+        X, Y, s=6, edgecolor="white", linewidth=0.5, color="k"
     )
     handles.append(Line2D([], [],
                           color="white",
-                          markerfacecolor=colors[(i + 1) % len(colors)],
+                          markerfacecolor="k",
                           marker="o",
                           markersize=10))
-    labels.append("Original")
+    labels.append("Zeros")
 
     plt.legend(handles, labels)
     plt.title(f"{lang_strs.loc[lid, 'language']}")
