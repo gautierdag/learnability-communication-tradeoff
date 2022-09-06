@@ -12,6 +12,7 @@ import multiprocessing
 
 from tqdm import trange
 
+from convergence import get_accuracy
 from learnability_frontier import fit_optimal_curve
 from som import SelfOrganisingMap, sample_range
 
@@ -204,6 +205,7 @@ if __name__ == "__main__":
                         help="Whether to use CE-optimal or suboptimal languages.")
     parser.add_argument("--i", type=int, default=None, help="Select a particular beta by index. ")
     parser.add_argument("--beta", type=float, default=None, help="Beta-value to use for training. ")
+    parser.add_argument("--size", type=int, default=13, help="Size K of SOM.")
 
     args = parser.parse_args()
 
@@ -221,7 +223,7 @@ if __name__ == "__main__":
         files = glob.glob(os.path.join("output", "worst_qs", "*"))
 
     files = sorted(files, key=lambda x: float(x.split(os.sep)[-1].split("_")[0]))
-    existing_betas = [float(d.split(os.sep)[-1]) for d in set(glob.glob(f"output/som/{seed}/ce/*")) - {f"output/som/{seed}/ce/processed"}]
+    # existing_betas = [float(d.split(os.sep)[-1]) for d in set(glob.glob(f"output/som/{seed}/ce/*")) - {f"output/som/{seed}/ce/processed"}]
 
     betas = {}
     num_words = {}
@@ -243,20 +245,17 @@ if __name__ == "__main__":
         if args.beta is not None:
             if beta != args.beta:
                 continue
-        elif len(existing_betas) == 0:
+        else:
             if prev_num_words > 0 and num_words[i] <= prev_num_words + 2:
                 prev_num_words = num_words[i]
                 continue
             prev_num_words = num_words[i]
             if args.i is not None and i != args.i:
                 continue
-        else:
-            if beta in existing_betas:
-                continue
 
         print(i, f, num_words[i])
 
-        som = SelfOrganisingMap()
+        som = SelfOrganisingMap(size=args.size, sigma=0.5)
 
         save_path = os.path.join("output", "som", f"{seed}", "ce", f"{int(beta) if not args.optimal else beta}")
         if not os.path.exists(os.path.join("output", "som", f"{seed}", "ce")):
@@ -279,17 +278,20 @@ if __name__ == "__main__":
                 sampling_scores.append(som.learn_language_from_samples(None, (w, c), sample_range,
                                                                        sampler.num_words, m, sampler.prob_matrix.T,
                                                                        save_pt_s=save_path))
+                p_t_s = som.predict_t_s_model(som.distance_matrix, m, sampler.num_words)
+                acc = get_accuracy(p_t_s, sampler.prob_matrix)
+                print(acc)
 
                 # Load all saved p_t_s and join to already calculated ones
-                if save_path:
-                    for s in sample_range:
-                        p_t_s = np.load(os.path.join(save_path, f"{s}_pt_s.npy"))
-                        if not os.path.exists(os.path.join(save_path, f"{s}_pt_s_all.npy")):
-                            joined = p_t_s[None, :]
-                        else:
-                            joined = np.load(os.path.join(save_path, f"{s}_pt_s_all.npy"))
-                            joined = np.vstack([joined, p_t_s[None, :]])
-                        np.save(os.path.join(save_path, f"{s}_pt_s_all.npy"), joined)
+                # if save_path:
+                #     for s in sample_range:
+                #         p_t_s = np.load(os.path.join(save_path, f"{s}_pt_s.npy"))
+                #         if not os.path.exists(os.path.join(save_path, f"{s}_pt_s_all.npy")):
+                #             joined = p_t_s[None, :]
+                #         else:
+                #             joined = np.load(os.path.join(save_path, f"{s}_pt_s_all.npy"))
+                #             joined = np.vstack([joined, p_t_s[None, :]])
+                #         np.save(os.path.join(save_path, f"{s}_pt_s_all.npy"), joined)
 
         np_scores = np.array(sampling_scores)
         scores[i] = np.hstack([np.mean(np_scores, 0), np.std(np_scores, 0)])

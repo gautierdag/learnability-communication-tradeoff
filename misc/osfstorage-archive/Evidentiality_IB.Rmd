@@ -1,0 +1,727 @@
+---
+title: "Evidentiality IB"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+library(themis)
+library(lme4)
+library(patchwork)
+library(ggrepel)
+library(ggridges)
+library(here)
+
+ev_scale = scale_fill_manual(values=c('#be29ec', '#d896ff', '#ae0001', '#d67f80', '#008080', '#66b2b2'))
+evr_scale = scale_fill_manual(values=rev(c('#be29ec', '#d896ff', '#ae0001', '#d67f80', '#008080', '#66b2b2')))
+
+library(reticulate)
+use_python("/usr/bin/python3", required = TRUE)
+```
+
+```{python config, echo=F}
+import sys
+sys.path.append(r.here())
+import numpy as np
+import pandas
+from collections import namedtuple
+from ibhelpers import *
+from scipy.spatial import distance
+```
+
+# Evidentiality
+
+## Meaning
+
+In this analysis, we will use the information bottleneck method to define an optimal frontier, score attested languages, score possible languages and check whether distance to the pareto-frontier is a better predictor of whether a language is attested than either complexity or information loss alone.
+
+### Assumptions
+
+The first thing we do is formalize our assumptions.
+
+```{python evid_specification}
+
+# Quechua split evenly
+p_x =  np.array([0.4658, 0.4658, 0.0103, 0.0103, 0.0239, 0.0239])
+p_x = p_x / np.sum(p_x)
+
+items = ['v', 's', 'i', 'a', 'h', 'q']
+
+eps = 0.01
+q0 = (1 - eps) * np.eye(6) + eps * np.ones((6, 6))
+
+kap = 0.5
+lam = 0.1
+p_xGy = np.array(
+    [[1, kap, kap*lam, kap**2 * lam, kap**2 * lam**2, kap**3 * lam**2],  # V
+     [kap, 1, lam, kap*lam, lam**2 * kap, lam**2 * kap**2],  # S
+     [kap*lam, lam, 1, kap, lam*kap, lam*kap**2],  # I
+     [kap**2 *lam, kap*lam, kap, 1, lam, lam*kap],  # A
+     [kap**2 * lam**2, kap * lam**2, kap*lam, lam, 1, kap],  # H
+     [kap**3 * lam**2, kap**2 * lam**2, kap**2 *lam, kap*lam, kap, 1]]) #Q        
+
+p_mGs = p_xGy / np.sum(p_xGy, axis=0)
+p_xGy = p_xGy / p_xGy.sum(axis=1, keepdims=True)
+p_xy = p_xGy * p_x[:, np.newaxis]
+p_xy = p_xy / np.sum(p_xy)
+
+```
+
+Plot the assumptions
+
+```{r evid_fig1}
+
+evid_prior = data.frame(x=c('s[v]', 's[s]', 's[i]', 's[a]', 's[h]', 's[q]'),
+                   p=py$p_x) %>%
+  mutate(x = fct_relevel(x, 's[v]', 's[s]', 's[i]', 's[a]', 's[h]', 's[q]'))
+
+evid_px = evid_prior %>%
+    ggplot(aes(x, p, fill=x)) +
+    geom_bar(stat='identity') +
+    theme_classic(base_size = 18) +
+    ylab('Prior Probability') +
+    xlab('Speaker Distribution') +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    coord_cartesian(ylim = c(0, 0.75)) +
+    ev_scale +
+    scale_x_discrete(labels=c(expression(s[v]), expression(s[s]), expression(s[i]), expression(s[a]), expression(s[h]), expression(s[q]))) +
+    guides(fill=F)
+evid_px
+
+evid_meaning = py$p_xGy %>%
+    as.data.frame() %>%
+    rename(`s[v]` = V1, `s[s]` = V2, `s[i]` = V3, `s[a]` = V4, `s[h]` = V5, `s[q]` = V6) %>%
+    mutate(x=c('Visual\nv', 'Sensory\ns', 'Inferred\ni', 'Assumed\na', 'Hearsay\nh', 'Quotative\nq')) %>%
+    gather(goal, p, `s[v]`:`s[q]`) %>%
+    mutate(goal = fct_relevel(goal, 's[q]', 's[h]', 's[a]', 's[i]', 's[s]', 's[v]'),
+           x = fct_relevel(x, 'Visual\nv', 'Sensory\ns', 'Inferred\ni', 'Assumed\na', 'Hearsay\nh', 'Quotative\nq'))
+
+evid_pxy = evid_meaning %>%
+    ggplot(aes(x=x, y=p, group=goal)) +
+    facet_grid(goal~., scales = 'free_y', switch = 'y', as.table = F, labeller = label_parsed) +
+    geom_hline(yintercept = 0) +
+    geom_bar(stat='identity', aes(fill=goal), alpha=0.8) +
+    theme_classic(base_size = 18) +
+    guides(fill=F) +
+    ggtitle('Evidentiality') +
+    ylab('Speaker Distribution') +
+    xlab('World State') +
+    evr_scale +
+    theme(axis.ticks.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.line.y = element_blank())
+evid_pxy
+
+```
+
+### The Pareto Frontier
+
+Now let's run the Information Bottleneck Method
+
+```{python evid_ib}
+# trace out optimal frontier
+q0 = q0 / q0.sum(axis=1, keepdims=True)
+betas = np.array([2.0 ** x for x in np.arange(5, 0, -0.001)])
+focalbeta = 5.3
+
+q, beta, ibscores, qresult, qseq, qseqresults, allqs = fit_ib(p_xy, q0, focalbeta, betas, verbose=1)
+
+ib_scores_df = pandas.DataFrame(np.array(ibscores), columns = ['rate', 'distortion', 'elen'])
+ib_scores_df['beta'] = betas
+ib_scores_df['q'] = allqs
+ib_scores_df['Wn'] = [mergecols(q).shape[1] for q in ib_scores_df['q']]
+
+stochSys = []
+for i, q in enumerate(zip(qseq, qseqresults)):
+    for w in mergecols(q[0]).transpose():
+        stochSys.append([len(qseq)-i, q[1][0], q[1][1]] + list(w))
+
+stochSys = pandas.DataFrame(data=np.array(stochSys), columns = ['n', 'rate', 'distortion'] + items)
+
+```
+
+```{python frontier_metrics}
+
+# compute distance from optimal frontier
+def fd(asys, ibscores):
+    mind = distance.cdist([[asys['rate'], asys['distortion']]], ibscores[['rate', 'distortion']]).min()
+    return mind
+
+
+def gNID_d(asys, paretoQs, betas, pX):
+    mind = np.zeros((len(asys), len(paretoQs)))
+    for li in range(len(asys)):
+        for qi, q in enumerate(paretoQs):
+            mind[li, qi] = gNID(asys.iloc[li]['q'], q, pX)
+    return np.argmin(mind, axis=1), np.min(mind, axis=1), betas[np.argmin(mind, axis=1)]
+
+
+```
+
+### Attested Languages
+
+First we load and pre-process
+
+```{python evid_channels}
+
+bd =  pandas.read_csv('Data/Evidentiality_Meanings.csv')
+
+def present(x):
+    x =  str(x)
+    x = str.split(x, ';')[0]
+    return  (x in ['a', 'b', 'c', 'd', 'e', 'f'])
+
+
+def extract_cats(td):
+    cats = []
+    if present(td.V):
+        cats.append([0])
+    if present(td.S):
+        cats.append([1])
+    if present(td.I):
+        cats.append([2])
+    if present(td.A):
+        cats.append([3])
+    if present(td.H):
+        cats.append([4])
+    if present(td.Q):
+        cats.append([5])
+    if present(td.VS):
+        cats.append([0,1])
+    if present(td.IH):
+        cats.append([2,4])
+    if present(td.IA):
+        cats.append([2,3])
+    if present(td.HQ):
+        cats.append([4,5])
+    if present(td.VSI):
+        cats.append([0,1,2])
+    if present(td.IAHQ):
+        cats.append([2,3,4,5])
+    if present(td.SIAHQ):
+        cats.append([1,2,3,4,5])
+    
+    return cats
+
+ef = extract_cats
+n = 6
+
+bd['categories'] = bd.apply(ef,  axis=1)
+bd = bd[['Language', 'Family', 'Source', 'Page', 'categories']]
+
+def unpackoutputs(row):
+    row['q'], row['lens']= cats2q(row['categories'], n)
+    return row
+
+bd = bd.apply(unpackoutputs, axis=1)
+bd['ind'] = range(bd.shape[0])
+
+```
+
+Then we score
+
+```{python evid_attested}
+attested_data = bd
+attested_data = attested_data.dropna()
+attested_data['rate'] = 0
+attested_data['distortion'] = 0
+attested_data['exp_len'] = 0
+attested_data['lab'] = ''
+attested_perm_zc_scores= []
+npitems = np.array(items)
+
+for i in attested_data['ind']:
+    q = attested_data.loc[i,'q']
+    nat = naturalness(q, p_mGs)
+    result = score_q_kl(p_xy, q)
+    attested_data.loc[i,  'rate']  = result.rate
+    attested_data.loc[i,  'distortion'] = result.distortion
+    attested_data.loc[i,  'naturalness'] = np.sum(nat)
+    lens = attested_data.loc[i, 'lens']
+    attested_data.loc[i, 'exp_len'] = exp_len(q, p_x, lens)
+    nc = len(attested_data.loc[i, 'categories'])
+    attested_data.loc[i,  'n'] = nc
+    attested_data.loc[i,  'lab'] = zmlabel(attested_data.loc[i, 'categories'], attested_data.loc[i,'lens'], npitems)
+    attested_data.loc[i,  'zlab'] = zlabel(attested_data.loc[i, 'categories'], npitems)
+    for j in np.arange(-1, nc):
+        l  = make_lens(j, nc, n)
+        e_len = exp_len(q, p_x, l)
+        attested_perm_zc_scores.append( (result.rate, result.distortion, e_len))
+
+
+attested_data['frontier_dist'] = attested_data.apply(fd,  args = (ib_scores_df,), axis=1)
+attested_data['rate_round'] = np.round(attested_data['rate'], 4)
+attested_data['distortion_round'] = np.round(attested_data['distortion'], 4)
+attested_data['frontier_dist_round'] = np.round(attested_data['frontier_dist'], 4)
+attested_data['exp_len_round'] = np.round(attested_data['exp_len'], 4)
+_, attested_data['gNID'], attested_data['gNID_beta']  = gNID_d(attested_data, allqs, betas, p_x)
+attested_data['Wn'] = [mergecols(q).shape[1] for q in attested_data['q']]
+
+attested_perm_zc_df = pandas.DataFrame(np.array(attested_perm_zc_scores), columns = ['rate', 'distortion', 'exp_len'])
+
+channels = []
+for i in attested_data['ind']:
+    q = attested_data.loc[i,'q']
+    for w in mergecols(q).transpose():
+        channels.append([attested_data.loc[i, 'Language'], attested_data.loc[i, 'rate'], attested_data.loc[i, 'distortion']] + list(w))
+
+channels = pandas.DataFrame(data=np.array(channels), columns = ['Language', 'rate', 'distortion'] + items)
+
+```
+
+### Possible Systems
+
+Let's generate and score some possible systems
+
+```{python evid_possible}
+# deterministic systems with item labels
+detsystems = list(partition(items))
+# deterministic systems with item indices
+iteminds=list(range(len(items)))
+detsysteminds = list(partition(iteminds))
+
+# score deterministic systems
+ds_scores = []
+ds_scores_explen = []
+dqs = []
+for ds in detsysteminds:
+    q = partition2q(ds)
+    dqs.append(q)
+    nat = naturalness(q, p_mGs)
+    result = score_q_kl(p_xy, q)
+    ds_scores.append( (result.rate, result.distortion, np.sum(nat)))
+    nc = len(ds)
+    for i in np.arange(-1, nc):
+        l  = make_lens(i, nc, n)
+        e_len = exp_len(q, p_x, l)
+        ds_scores_explen.append( (result.rate, result.distortion, e_len))
+
+# make labels for deterministic systems
+syslabels = [partition_label(p) for p in detsystems]
+
+ds_scores_df = pandas.DataFrame(np.array(ds_scores), columns = ['rate', 'distortion', 'naturalness'])
+ds_scores_df['name'] = np.array(syslabels)
+ds_scores_df['categories'] = np.array(detsysteminds)
+ds_scores_df['q'] = dqs
+ds_scores_df['n'] = ds_scores_df['categories'].apply(lambda x: len(x))
+ds_scores_df['rate_round'] = np.round(ds_scores_df['rate'], 4)
+ds_scores_df['distortion_round'] = np.round(ds_scores_df['distortion'], 4)
+ds_scores_df['frontier_dist'] = ds_scores_df.apply(fd,  args = (ib_scores_df,), axis=1)
+_, ds_scores_df['gNID'], ds_scores_df['gNID_beta']  = gNID_d(ds_scores_df, allqs, betas, p_x)
+ds_scores_df['Wn'] = [mergecols(q).shape[1] for q in ds_scores_df['q']]
+
+ds_scores_explen_df = pandas.DataFrame(np.array(ds_scores_explen), columns = ['rate', 'distortion', 'exp_len'])
+
+```
+
+```{python evid_postProcess, echo=F, eval=F}
+# Save the partial outputs
+
+ib_scores_df.to_csv('Output/Evidentiality/pareto.csv')
+ds_scores_df.to_csv('Output/Evidentiality/detSys.csv')
+ds_scores_explen_df.to_csv('Output/Evidentiality/detSysELen.csv')
+attested_data.to_csv('Output/Evidentiality/attested.csv')
+attested_perm_zc_df.to_csv('Output/Evidentiality/attestedLen.csv')
+stochSys.to_csv('Output/Evidentiality/stochSys.csv')
+channels.to_csv('Output/Evidentiality/channels.csv')
+
+```
+
+### Putting it all Together
+
+
+```{r evid_fig2}
+evid_pareto = py$ib_scores_df
+evid_detSys = py$ds_scores_df
+evid_detSysLen = py$ds_scores_explen_df
+evid_attested = py$attested_data
+evid_attestedLen = py$attested_perm_zc_df
+
+evid_ag = evid_attested %>%
+  group_by(zlab) %>%
+  summarise(rate=mean(rate), 
+            distortion=mean(distortion), 
+            N=n(), 
+            lab=first(zlab))
+
+evid_ag2 = evid_attested %>%
+    group_by(Language) %>%
+    mutate(q = paste0(unlist(q), collapse='')) %>%
+    ungroup() %>%
+    group_by(q) %>%
+    summarise(rate=mean(rate),
+              distortion=mean(distortion),
+              N=n(),
+              Wn=first(Wn),
+              lab=first(q))
+
+evid_attested %>% pull(Language) %>% unique() %>% length()
+
+evid_frontier = evid_pareto %>%
+  ggplot(aes(rate, distortion)) +
+  geom_area(fill='grey60') +
+  geom_line() +
+  geom_point(data=evid_detSys, color='grey80') +
+  geom_point(data=evid_ag, aes(size=N)) +
+  ylab('Information Loss') +
+  xlab('Complexity') +
+  theme_classic(base_size = 14) +
+  ggtitle('Evidentiality') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_cartesian(ylim=c(0, 0.5), xlim=c(0, 1.6))
+evid_frontier
+
+evid_frontier_simp = evid_detSys %>%
+  select(Wn, distortion) %>%
+  distinct() %>%
+  ggplot(aes(Wn, distortion)) +
+  geom_point(color='grey80') +
+  geom_point(data=evid_ag2, aes(size=N)) +
+  ylab('Information Loss') +
+  xlab('Inventory Complexity') +
+  theme_classic(base_size = 14) +
+  ggtitle('Evidentiality') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(breaks=1:6)
+evid_frontier_simp
+
+```
+
+### Attested vs Possible Prediction
+
+```{r}
+
+evid_systems = evid_attested %>% 
+    filter(zlab != '(vsiahq)') %>%
+    select(zlab, rate_round, distortion_round, frontier_dist_round, gNID) %>% distinct() %>%
+    full_join(evid_detSys %>% select(name, rate_round, distortion_round, front=frontier_dist, gNID) %>% filter(name != '(vsiahq)')) %>%
+    mutate(System = ifelse(is.na(frontier_dist_round), 'Possible', 'Attested'),
+           frontier_distance_round = ifelse(is.na(frontier_dist_round), round(front, 4), frontier_dist_round))
+
+evid_front = evid_systems %>%
+    ggplot(aes(x=System, y=frontier_distance_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Distance to Pareto-Front') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+
+evid_gNID = evid_systems %>%
+    ggplot(aes(x=System, y=gNID, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Generalized Normalized Information Distance') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+
+evid_unif= evid_systems %>% 
+    ggplot(aes(x=System, y=rate_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Complexity') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+
+evid_div= evid_systems %>% 
+    ggplot(aes(x=System, y=distortion_round, fill=System)) +
+    geom_boxplot() +
+    guides(fill=F) +
+    ylab('Information Loss') +
+    xlab('') +
+    theme_classic() +
+    coord_flip()
+
+(evid_unif / evid_div / evid_front / evid_gNID)
+
+```
+
+```{r, evid_attest}
+set.seed(1234)
+ev_systems = evid_attested %>% 
+    select(rate_round, distortion_round, frontier_dist_round, gNID) %>% distinct() %>%
+    full_join(evid_detSys %>% 
+                  mutate(rate_round=round(rate,4), distortion_round=round(distortion,4)) %>% 
+                  select(rate_round, distortion_round, front=frontier_dist, gNID)) %>%
+    mutate(System = ifelse(is.na(frontier_dist_round), 'Possible', 'Attested'),
+           frontier_distance_round = ifelse(is.na(frontier_dist_round), round(front, 4), frontier_dist_round)) 
+
+table(ev_systems$System)
+
+######## Formulas
+
+# Complexity Formula
+ev_rec_rate <- 
+  recipe(System ~ rate_round, data = ev_systems) %>%
+  step_rose(System)
+
+# Information Loss Formula
+ev_rec_dist <- 
+  recipe(System ~ distortion_round, data = ev_systems) %>%
+  step_rose(System)
+
+# Paretofront Formula
+ev_rec_front <- 
+  recipe(System ~ frontier_distance_round, data = ev_systems) %>%
+  step_rose(System)
+
+# GNID
+ev_rec_gnid <- 
+  recipe(System ~ gNID, data = ev_systems) %>%
+  step_rose(System)
+
+######## Model
+
+ev_mod <-
+  logistic_reg() %>%
+  set_engine('glm')
+
+# Workflow
+ev_rose_wflw <- 
+  workflow() %>% 
+  add_model(ev_mod) 
+
+######## Evaluation
+
+# Set up 10-fold Cross Validation
+cv_folds <- vfold_cv(ev_systems, strata = "System", repeats = 10)
+
+# Definte the loss function as the log likelihood
+logliklihood = function(...){ mn_log_loss(..., sum=TRUE)}
+class(logliklihood) <- class(mn_log_loss)
+attr(logliklihood, "direction") <- attr(mn_log_loss, "direction")
+
+######## Fits
+
+# Complexity
+
+ev_rose_res_rate <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_rate), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_rate)
+
+# Information Loss
+
+ev_rose_res_dist <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_dist), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_dist)
+
+# Paretofront
+
+ev_rose_res_front <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_front), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_front)
+
+# GNID
+
+ev_rose_res_gnid <- fit_resamples(
+  ev_rose_wflw %>%
+      add_recipe(ev_rec_gnid), 
+  resamples = cv_folds,
+  metrics = metric_set(accuracy, logliklihood),
+  control = control_resamples(save_pred = TRUE)
+)
+collect_metrics(ev_rose_res_gnid)
+
+######## Log Likelihoods
+
+ev_rose_res_rate %>%
+  collect_predictions() %>%
+  mutate(logLike = ifelse(System=='Attested', log(.pred_Attested), log(.pred_Possible))) %>%
+  pull(logLike) %>% sum
+
+ev_rose_res_dist %>%
+  collect_predictions() %>%
+  mutate(logLike = ifelse(System=='Attested', log(.pred_Attested), log(.pred_Possible))) %>%
+  pull(logLike) %>% sum
+
+ev_rose_res_front %>%
+  collect_predictions() %>%
+  mutate(logLike = ifelse(System=='Attested', log(.pred_Attested), log(.pred_Possible))) %>%
+  pull(logLike) %>% sum
+
+ev_rose_res_gnid %>%
+  collect_predictions() %>%
+  mutate(logLike = ifelse(System=='Attested', log(.pred_Attested), log(.pred_Possible))) %>%
+  pull(logLike) %>% sum(na.rm = T)
+
+```
+
+## Form
+
+### Overall correlation
+
+```{r evid_form}
+de = read.csv('Data/Evidentiality_Forms.csv')
+
+dei = evid_attested %>%
+    select(Language, Family, Distortion=distortion)
+
+attested = de %>%
+    mutate(Form = as.character(Form),
+           Length = nchar(Form)) %>%
+    group_by(Language, Meaning) %>%
+    summarise(Length = mean(Length)) %>%
+    ungroup() %>%
+    mutate(p = 0,
+           p = ifelse(grepl('v', Meaning), p+0.45, p),
+           p = ifelse(grepl('s', Meaning), p+0.45, p),
+           p = ifelse(grepl('i', Meaning), p+0.01, p),
+           p = ifelse(grepl('I', Meaning), p+0.01, p),
+           p = ifelse(grepl('a', Meaning), p+0.01, p),
+           p = ifelse(grepl('h', Meaning), p+0.04, p),
+           p = ifelse(grepl('q', Meaning), p+0.04, p),
+           len = ifelse(p==0, 0, -log2(p))
+    ) %>%
+    group_by(Language) %>%
+    mutate(Length = Length / max(Length),
+           len = len / max(len)) %>%
+    ungroup() %>%
+    left_join(dei)
+
+evid_form = attested %>%
+    group_by(Meaning) %>%
+    summarise(LengthU = mean(Length) + sd(Length) / sqrt(n()),
+              LengthL = mean(Length) - sd(Length)  / sqrt(n()),
+              Length = mean(Length),
+              lenU = mean(len) + sd(len)  / sqrt(n()),
+              lenL = mean(len) - sd(len)  / sqrt(n()),
+              len = mean(len)
+    ) %>%
+    ungroup() %>%
+    ggplot(aes(Length, len, label=Meaning, color=Meaning, linetype=Meaning)) +
+    stat_smooth(aes(group=Language), method=lm, se=F, color='grey90', alpha=0.01, data=attested) +
+    geom_segment(aes(x=LengthL, xend=LengthU, y=len, yend=len)) +
+    geom_segment(aes(x=Length, xend=Length, y=lenL, yend=lenU)) +
+    geom_text_repel(size=8) +
+    ylab('Optimal Length') +
+    xlab('Observed Length') +
+    ggtitle('Evidentiality') +
+    guides(color=F, linetype=F) +
+    theme_classic(base_size = 14)
+evid_form
+
+fit_e1 = lmer(Length ~ len + (1|Family) + (1|Language), data=attested)
+summary(fit_e1)
+
+fit_e0 = lmer(Length ~ 1 + (1|Family) + (1|Language), data=attested)
+summary(fit_e0)
+
+anova(fit_e1, fit_e0)
+
+```
+
+### Individual Languages
+
+```{r}
+
+att_corr = attested %>%
+  group_by(Language) %>%
+  summarise(correlation = cor(Length, len)) %>%
+  ungroup()
+
+evid_corr = attested %>%
+  left_join(att_corr) %>%
+  mutate(Language = fct_reorder(Language, -correlation)) %>%
+  ggplot(aes(Length, len)) +
+  facet_wrap(~Language, ncol = 7, as.table = T) +
+  stat_smooth(method=lm, se=F,  color='grey70', alpha=0.01) +
+  geom_text(aes(label=Meaning)) +
+  geom_label(aes(x=0.1, y=1, label=round(correlation, 2))) +  
+  ggtitle('Evidentiality') +
+  ylab('Optimal Length') +
+  xlab('Observed Length') +
+  theme_classic(base_size = 10) +
+  theme(aspect.ratio = 1) +
+  coord_cartesian(ylim=c(0,1),xlim=c(0,1))
+evid_corr
+
+```
+
+### Zero Marking Analysis
+
+```{r}
+
+evid_len2 = anti_join(
+  evid_detSysLen %>% 
+    mutate(distortion=round(distortion, 4),
+           exp_len = round(exp_len, 4)), 
+  attested %>%
+    group_by(Language) %>%
+    summarise(distortion=first(Distortion),
+              Length = ifelse(Length > 0, 1, 0),
+              exp_len = sum(Length * p)) %>%
+    ungroup()
+  ) %>%
+  anti_join( evid_attestedLen %>%
+               mutate(rate=round(rate, 4),
+                      distortion=round(distortion, 4),
+                      exp_len = round(exp_len, 4)))
+
+evid_length2 = evid_len2 %>% 
+  group_by(distortion, exp_len) %>%
+  summarise(N=n()) %>%
+  ungroup() %>%
+  mutate(Model='Possible') %>%
+  ggplot(aes(exp_len, distortion, color=Model)) +
+  geom_point() +
+  geom_point(data = evid_attestedLen %>%
+               group_by(rate, distortion, exp_len) %>%
+               summarise(N=n()) %>%
+               ungroup() %>%
+               mutate(Model='Permuted')) +
+  geom_point(data = attested %>%
+                   group_by(Language) %>%
+               summarise(distortion=first(Distortion),
+                         Length = ifelse(Length > 0, 1, 0),
+                         exp_len = sum(Length * p)) %>%
+               ungroup() %>%
+               group_by(distortion, exp_len) %>%
+               summarise(N=n()) %>%
+               ungroup() %>%
+               mutate(Model='Attested'),
+             aes(size=N)) +
+  scale_color_manual(values=c('black', 'cornflowerblue', 'grey80')) +
+  xlab('Expected Length') +
+  ylab('Information Loss') +
+  guides(color=F) +
+  theme_bw(base_size = 14) +
+  theme(legend.position = c(.05, .2))
+evid_length2
+
+ev_zm = evid_attested %>%
+  filter(distortion < max(distortion)) %>%
+  mutate(ZM = ifelse(exp_len == 1, 0, 1)) %>%
+  glmer(ZM ~ distortion + (1|Family), family=binomial(link='logit'), data=.)
+summary(ev_zm)
+
+ev_base = evid_attested %>%
+  filter(distortion < max(distortion)) %>%
+  mutate(ZM = ifelse(exp_len == 1, 0, 1)) %>%
+  glmer(ZM ~ 1 + (1|Family), family=binomial(link='logit'), data=.)
+summary(ev_base)
+
+anova(ev_zm, ev_base)
+
+```

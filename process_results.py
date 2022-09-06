@@ -1,4 +1,5 @@
 import os
+import pickle
 import sys
 import numpy as np
 import pandas as pd
@@ -46,24 +47,31 @@ def convergence(arr, window=20, threshold=0.005):
 
 if __name__ == '__main__':
     seed = 42
-    ce = True
+    ce = False
+    suboptimal = False
+    rotations = pickle.load(open("pickle/worst_qs_rotated.p", "rb"))
+    data_dir = "ablations"
     if not ce:
-        path = os.path.join("output", "som", f"{seed}", "lang")
+        if suboptimal:
+            path = os.path.join("output", "som", f"{seed}", "suboptimal")
+        else:
+            path = os.path.join("output", "som", f"{seed}", data_dir)
         lid = int(sys.argv[1]) if len(sys.argv) > 1 else 2
         if not os.path.exists(os.path.join(path, "processed")):
             os.mkdir(os.path.join(path, "processed"))
 
-        som = SelfOrganisingMap()
-        data = som.term_data
-        data = data[~pd.isna(data["word"])]
+        som = SelfOrganisingMap(subopt=suboptimal,
+                                wcs_path="wcs_en" if data_dir == "en" else "wcs",
+                                sampling="english" if data_dir == "en" else "corpus")
 
         print(f"Processing Language {lid}")
         lid_folder = os.path.join(path, str(lid))
         results = pd.DataFrame()
 
         ps = 0.9 * som.ps[lid] + 0.1 * som.ps_universal
+        if suboptimal:
+            ps = ps[rotations[lid]["rotation_indices"], :]
         pts = som.pts[lid]
-        data = data[data["language"] == lid]
 
         samples = sorted(glob.glob(os.path.join(lid_folder, "*_all.npy")),
                          key=lambda x: int(x.split(os.sep)[-1].split("_")[0]))
@@ -82,10 +90,6 @@ if __name__ == '__main__':
                 "mutual_information": mutual_infs,
             })
 
-            # Calculate convergence
-            accs = accuracy(p_t_s_arr, lid, som, data)
-            results_dict.update({"accuracy": accs})
-
             results_dict.update({
                 "language": [lid] * average_k,
                 "n_samples": [n_samples] * average_k,
@@ -93,11 +97,6 @@ if __name__ == '__main__':
             })
 
             results = results.append(pd.DataFrame.from_dict(results_dict), ignore_index=True)
-
-        # Get point of convergence
-        accs = np.array([results.groupby("average_k")["accuracy"].get_group(j) for j in range(average_k)])
-        n_conv = convergence(accs)
-        results["n_convergence"] = n_conv * (len(results) // len(n_conv))
         results.to_csv(os.path.join(path, "processed", f"{lid}.csv"))
     else:
         path = os.path.join("output", "som", f"{seed}", "ce")
@@ -146,3 +145,13 @@ if __name__ == '__main__':
         if not os.path.exists(os.path.join(path, "processed")):
             os.mkdir(os.path.join(path, "processed"))
         results.to_csv(os.path.join(path, "processed", f"{beta}.csv"))
+
+    scores_dict = {}
+    for f in glob.glob(f"output/som/42/{data_dir}/processed/*.csv"):
+        results = pd.read_csv(f, index_col=0)
+        beta = float(f.split(os.sep)[-1][:-4])
+        arr = []
+        means = results.groupby("n_samples").mean()[["mutual_information", "information_loss"]].to_numpy()
+        stds = results.groupby("n_samples").std()[["mutual_information", "information_loss"]].to_numpy()
+        scores_dict[beta] = np.hstack([means, stds])
+    pickle.dump(scores_dict, open(f"output/som/42/{data_dir}/scores_dict.p", "wb"))

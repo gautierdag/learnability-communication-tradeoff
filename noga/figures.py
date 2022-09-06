@@ -96,7 +96,10 @@ def get_color_grid(pCW, chips=WCS_CHIPS):
     return grid
 
 
-def mode_map(qW_M, pM=None, small_grid=False, chips=WCS_CHIPS):
+def mode_map(qW_M, pM=None, small_grid=False, chips=WCS_CHIPS, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots()
+
     if pM is None:
         n = qW_M.shape[0]
         pM = np.ones((n, 1)) / n
@@ -107,10 +110,10 @@ def mode_map(qW_M, pM=None, small_grid=False, chips=WCS_CHIPS):
     g = img[:, :, 1]
     b = img[:, :, 2]
     clrs = np.array([r.flatten(), g.flatten(), b.flatten()]).T
-    ax = plt.pcolor(r, color=clrs, linewidth=0.04, edgecolors="None")
-    ax.set_array(None)
-    plt.xlim([0, 42])
-    plt.ylim([0, 10])
-    plt.xticks([])
-    plt.yticks([])
-    plt.axis("off")
+    a = ax.pcolor(r, color=clrs, linewidth=0.04, edgecolors="None")
+    a.set_array(None)
+    ax.set_xlim([0, 42])
+    ax.set_ylim([0, 10])
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.axis("off")

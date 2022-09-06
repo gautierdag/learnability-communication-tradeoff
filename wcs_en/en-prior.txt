@@ -1,0 +1,12 @@
+#lnum	abbr	tnum	term	prob
+6	BU	6	blue	0.19
+6	GN	4	green	0.16
+6	PU	8	purple	0.02
+6	PI	9	pink	0.05
+6	OR	10	orange	0.07
+6	BR	7	brown	0.04
+6	RE	3	red	0.20
+6	GY	11	grey	0.01
+6	YE	5	yellow	0.13
+6	BA	1	black	0.04
+6	WH	2	white	0.09
