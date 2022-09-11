@@ -1,3 +1,4 @@
+import argparse
 import glob
 import os
 import pickle
@@ -75,9 +76,17 @@ pwc = pc_w / pc_w.sum()
 # mode_map(pc_w.T)
 # plt.show()
 
+parser = argparse.ArgumentParser(description="Run SOM on WCS data")
+parser.add_argument("--average_k", type=int, default=5, help="The number of learners to "
+                                                             "average over for the developmental plots.")
+parser.add_argument("--lid", type=int, default=None, help="ID of language to learn.")
+
+args = parser.parse_args()
+print(args)
+
 # Global parameters
 n = sample_range[-1]
-average_k = 5
+average_k = args.average_k
 wcs = "wcs"
 sampling = "corpus"
 prior = "capacity" if wcs != "wcs_en" else "english"
@@ -87,7 +96,7 @@ grid_search = False
 save_p = True
 save_samples = False
 
-lid = 2  # Needed for some to run but irrelevant as long as integer in [1, 110]
+lid = args.lid  # Needed for some to run but irrelevant as long as integer in [1, 110]
 
 if not os.path.exists("output"):
     os.mkdir("output")
