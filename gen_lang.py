@@ -26,6 +26,8 @@ som = SelfOrganisingMap()
 M = 2  # Number of grayscale terms
 N = som.term_size[lid] - M  # Number of terms to use
 
+print(f"Generating random language with {N + M} terms.")
+
 random.seed(seed)
 np.seterr(divide="ignore")
 np.random.seed(seed)
