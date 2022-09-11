@@ -663,7 +663,7 @@ if __name__ == "__main__":
             "term_dist": term_dist,
             # "size": 2,
             # "alpha": 1e-4,
-            "model_init": "runiform"
+            "model_init": "zeros"
         }
         print(som_args)
 
@@ -698,5 +698,5 @@ if __name__ == "__main__":
                             joined = np.vstack([joined, p_t_s[None, :]])
                         np.save(f"output/som/{seed}/{lid}/{s}_pt_s_all.npy", joined)
 
-        scores_dict = get_average_scores(scores)
-        pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))
+        # scores_dict = get_average_scores(scores)
+        # pickle.dump(scores_dict, open(f"output/som/{seed}/scores_dict.p", "wb"))
