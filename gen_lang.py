@@ -125,6 +125,8 @@ print(som_args)
 
 scores = []
 
+pickle.dump(pwc, open(f"output/som/{seed}/random/{lid}/pts.p", "wb"))
+
 for k in trange(average_k):
     som = SelfOrganisingMap(**som_args)
     som.term_size[lid] = pwc.shape[0]

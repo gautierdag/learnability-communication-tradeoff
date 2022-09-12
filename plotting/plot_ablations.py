@@ -35,7 +35,7 @@ ax.set_xlabel(r"Complexity")
 ax.set_ylabel("Reconstructive Error")
 ax.set_title("Sampling Prior in English")
 for i, lid in enumerate(lids):
-    for j, init_type in enumerate(["integer", "uniform"]):
+    for j, init_type in enumerate(["integer", "uniform", "binary"]):
         dict_path = os.path.join(path, init_type)
         scores_dict = pickle.load(open(os.path.join(dict_path, "scores_dict.p"), "rb"))
         scores = scores_dict[lid]
@@ -81,7 +81,7 @@ for i, lid in enumerate(lids):
                           markerfacecolor="k",
                           marker="o",
                           markersize=10))
-    labels.append("Zeros")
+    labels.append("zeros")
 
     plt.legend(handles, labels)
     plt.title(f"{lang_strs.loc[lid, 'language']}")
