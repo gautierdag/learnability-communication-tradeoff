@@ -16,7 +16,7 @@ from som import SelfOrganisingMap, sample_range
 
 animate = False
 animate_traj = False
-lids = [2]  # range(1, 111)
+lids = [108]  # range(1, 111)
 seed = 42
 plt.rc('font', size=18)
 
@@ -28,13 +28,13 @@ plt.rc('axes', labelsize=24)    # fontsize of the x and y labels
 # plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=24)  # fontsize of the figure title
 
-path = f"output/som/{seed}/ablations"
+path = f"output/som/{seed}/"
 opath = f"output/som/{seed}/lang"
 spath = f"output/som/{seed}/suboptimal"
 som = SelfOrganisingMap()
 scores_dict = pickle.load(open(os.path.join(path, "scores_dict.p"), "rb"))
 sscores_dict = pickle.load(open(os.path.join(spath, "scores_dict.p"), "rb"))
-rotation = pickle.load(open("worst_qs_rotated.p", "rb"))
+rotation = pickle.load(open("pickle/worst_qs_rotated.p", "rb"))
 prop_cycle = plt.rcParams["axes.prop_cycle"]
 colors = prop_cycle.by_key()["color"]
 lang_strs = pd.read_csv("wcs/lang.txt", sep="\t", usecols=[0, 1],

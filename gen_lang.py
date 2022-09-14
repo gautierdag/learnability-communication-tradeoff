@@ -119,7 +119,7 @@ som_args = {
     "term_dist": term_dist,
     # "size": 2,
     # "alpha": 1e-4,
-    "model_init": "zeros"
+    "model_init": "rbinary"
 }
 print(som_args)
 
@@ -131,7 +131,7 @@ for k in trange(average_k):
     som = SelfOrganisingMap(**som_args)
     som.term_size[lid] = pwc.shape[0]
     som.pts[lid] = pwc
-    som.models[lid] = np.zeros((som.size, som.size, pwc.shape[0] + som.distance_matrix.shape[0]))
+    # som.models[lid] = np.zeros((som.size, som.size, pwc.shape[0] + som.distance_matrix.shape[0]))
 
     index_matrix = np.arange(pwc.size)
     samples = tuple(
@@ -139,7 +139,7 @@ for k in trange(average_k):
             np.random.choice(index_matrix, n, p=pwc.flatten()), pwc.shape
         )
     )
-    m = np.zeros((som.size, som.size, pwc.shape[0] + som.distance_matrix.shape[0]))
+    m = som.models[lid]
     language_scores = som.learn_language_from_samples(
         None, samples, sample_range, pwc.shape[0], m, pwc,
         os.path.join(f"output/som/{seed}/random", f"{lid}") if save_p else None)

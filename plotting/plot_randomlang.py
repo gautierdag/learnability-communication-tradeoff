@@ -9,12 +9,12 @@ from matplotlib.lines import Line2D
 
 seed = 42
 plt.rc('font', size=18)
-lids = [2]  # , 32, 35, 108]
+lids = [2, 32, 35, 108]
 
 plt.rc('axes', labelsize=24)    # fontsize of the x and y labels
 plt.rc('figure', titlesize=24)  # fontsize of the figure title
 
-path = f"output/som/{seed}/random"
+path = f"output/som/{seed}/randomlang-randominit"
 opath = f"output/som/{seed}/lang"
 odict = pickle.load(open(os.path.join(opath, "scores_dict.p"), "rb"))
 prop_cycle = plt.rcParams["axes.prop_cycle"]
@@ -77,7 +77,7 @@ handles.append(Line2D([], [],
                       markersize=10))
 labels.append("Original")
 
-plt.legend(handles, labels)
+# plt.legend(handles, labels)
 plt.title(f"{lang_strs.loc[lid, 'language']}")
 fig.tight_layout()
 fig.savefig(os.path.join(path, "learning_trajectories.pdf"))
